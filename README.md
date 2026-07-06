@@ -1,4 +1,4 @@
-# DetourEats App v0.3
+# DetourEats App v0.3.1
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -90,3 +90,10 @@ Still simulated:
 - Restaurant data
 - ETA / added trip time
 - Live hours
+
+
+## v0.3.1 fix
+
+- Fixed candidate data not being available to the app layer in some browser deployments.
+- Fixed field-name mismatches between app.js and data.js.
+- Fixed issue where the app could show "Keep Driving" immediately even though prototype candidates exist.

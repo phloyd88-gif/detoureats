@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.1
+- Fixed data/engine wiring bug causing the app to show only Keep Driving.
+- Explicitly exposed candidate data to the browser window.
+- Mapped app fields to existing data fields like seq, estimatedAddedMinutes, famousFor, and arrivalClock.
+
+
 ## v0.3
 - Added clearer trip states and recommendation tiers.
 - Improved recommendation copy and practical/best-available logic.

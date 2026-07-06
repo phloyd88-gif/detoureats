@@ -1289,3 +1289,7 @@ const candidates = [
     }
   }
 ];
+
+// Expose prototype candidate data to the app layer.
+// This avoids browser scoping issues with top-level `const candidates`.
+window.DETOUR_EATS_CANDIDATES = candidates;

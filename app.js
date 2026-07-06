@@ -55,18 +55,37 @@ function getCandidates() {
 function getEngineResult() {
   const candidates = getCandidates();
 
+  const engineSettings = {
+    routePosition: state.routePosition,
+    currentTime: state.currentTime,
+    maxAdded: state.maxAdded,
+    maxAddedMinutes: state.maxAdded,
+    lookahead: state.lookahead,
+    candidatePool: state.candidatePool,
+    hoursMode: state.hoursMode,
+    tripMode: state.tripMode,
+    travelDay: "saturday",
+    corridor: "All",
+    hideChains: true,
+    mealMode: "auto",
+    mealType: getMealWindowLabel()
+  };
+
+  // v0.1/v0.2 engine exposes a global recommend(candidates, settings) function.
+  if (typeof window.recommend === "function") {
+    const result = window.recommend(candidates, engineSettings);
+    return {
+      ...result,
+      pick: result.pick,
+      upcoming: result.upcoming || [],
+      evaluated: result.evaluated || []
+    };
+  }
+
   if (window.DetourEngine && typeof window.DetourEngine.recommend === "function") {
     return window.DetourEngine.recommend({
       candidates,
-      maxAddedMinutes: state.maxAdded,
-      maxAdded: state.maxAdded,
-      currentTime: state.currentTime,
-      currentMinute: state.currentTime,
-      routePosition: state.routePosition,
-      lookahead: state.lookahead,
-      candidatePool: state.candidatePool,
-      hoursMode: state.hoursMode,
-      tripMode: state.tripMode,
+      ...engineSettings,
       skippedIds: state.skippedIds
     });
   }
@@ -74,29 +93,24 @@ function getEngineResult() {
   if (typeof window.getRecommendation === "function") {
     return window.getRecommendation({
       candidates,
-      maxAddedMinutes: state.maxAdded,
-      currentTime: state.currentTime,
-      routePosition: state.routePosition,
-      lookahead: state.lookahead,
-      candidatePool: state.candidatePool,
-      hoursMode: state.hoursMode,
-      tripMode: state.tripMode,
+      ...engineSettings,
       skippedIds: state.skippedIds
     });
   }
 
   // Fallback scoring if engine.js API changes or is unavailable.
+  const lookaheadLimit = state.lookahead === 99 ? 999 : state.lookahead;
   const visible = candidates
     .filter(c => !state.skippedIds.has(String(c.id ?? c.name)))
     .filter(c => passesPool(c))
-    .filter(c => Number(c.sequence ?? c.routeIndex ?? 0) >= state.routePosition)
-    .slice(0, state.lookahead === 99 ? 999 : state.lookahead)
-    .map(c => ({...c, _score: fallbackScore(c)}))
-    .sort((a, b) => b._score - a._score);
+    .filter(c => Number(c.seq ?? c.sequence ?? c.routeIndex ?? 0) >= state.routePosition)
+    .slice(0, lookaheadLimit)
+    .map(c => ({...c, score: fallbackScore(c)}))
+    .sort((a, b) => b.score - a.score);
 
   return {
     pick: visible[0] || null,
-    upcoming: visible.slice(0, 5),
+    upcoming: visible.slice(0, 6),
     reason: visible[0] ? "recommended" : "no_candidates"
   };
 }
@@ -114,8 +128,8 @@ function passesPool(c) {
 }
 
 function fallbackScore(c) {
-  const quality = Number(c.quality ?? c.ratingScore ?? c.score ?? 75);
-  const added = Number(c.addedMinutes ?? c.addedTime ?? c.detourMinutes ?? 12);
+  const quality = Number(c.destinationEvidence ? (c.destinationEvidence * 8 + (c.uniqueness ?? 5) * 2) : (c.quality ?? c.ratingScore ?? c.score ?? 75));
+  const added = Number(c.addedMinutes ?? c.estimatedAddedMinutes ?? c.addedTime ?? c.detourMinutes ?? 12);
   const independentBonus = c.chain ? -8 : 5;
   const tripPenalty = Math.max(0, added - state.maxAdded) * 3;
   return Math.round(Math.max(0, Math.min(99, quality + independentBonus - tripPenalty)));
@@ -132,15 +146,16 @@ function normalizePick(rawPick) {
 
   const added =
     rawPick.addedMinutes ??
+    rawPick.estimatedAddedMinutes ??
     rawPick.addedTime ??
     rawPick.detourMinutes ??
     rawPick.extraMinutes ??
     10;
 
   const name = rawPick.name ?? rawPick.restaurant ?? "Recommended Stop";
-  const signature = rawPick.signatureDish ?? rawPick.famousFor ?? rawPick.tagline ?? rawPick.summary ?? "Local food worth considering.";
-  const arrival = rawPick.arrivalTime ?? rawPick.eta ?? estimateArrival(rawPick);
-  const open = rawPick.openAtArrival ?? rawPick.isOpen ?? true;
+  const signature = rawPick.signatureDish ?? rawPick.famousFor ?? rawPick.tagline ?? rawPick.summary ?? rawPick.evidenceSummary ?? "Local food worth considering.";
+  const arrival = rawPick.arrivalTime ?? rawPick.arrivalClock ?? rawPick.eta ?? estimateArrival(rawPick);
+  const open = rawPick.openAtArrival ?? rawPick.isOpen ?? rawPick.hours?.open ?? true;
   const chain = Boolean(rawPick.chain);
   const id = String(rawPick.id ?? rawPick.name ?? Math.random());
 
@@ -158,7 +173,7 @@ function normalizePick(rawPick) {
 }
 
 function estimateArrival(pick) {
-  const seq = Number(pick.sequence ?? pick.routeIndex ?? state.routePosition);
+  const seq = Number(pick.seq ?? pick.sequence ?? pick.routeIndex ?? state.routePosition);
   const minutesAhead = Math.max(0, seq - state.routePosition) * 45;
   return formatMinutesOfDay(state.currentTime + minutesAhead);
 }
@@ -278,11 +293,21 @@ function render() {
   if (!state.started) return;
 
   const result = getEngineResult() || {};
-  const pick = normalizePick(result.pick || result.recommendation || result.best || result.currentPick);
-  const upcoming = (result.upcoming || result.candidates || []).map(normalizePick).filter(Boolean);
+  let pick = normalizePick(result.pick || result.recommendation || result.best || result.currentPick);
+  let upcoming = (result.upcoming || result.candidates || []).map(normalizePick).filter(Boolean);
+
+  if (pick && state.skippedIds.has(pick.id)) {
+    pick = upcoming.find(item => !state.skippedIds.has(item.id)) || null;
+  }
+  upcoming = upcoming.filter(item => !state.skippedIds.has(item.id));
 
   state.currentPick = pick;
   state.currentResult = result;
+
+  if (!pick) {
+    const fallback = getFallbackUpcoming(null)[0];
+    if (fallback) pick = fallback;
+  }
 
   const trip = getTripState(pick, result);
   const copy = getRecommendationCopy(pick, trip);
