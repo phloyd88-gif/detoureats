@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3
+- Added clearer trip states and recommendation tiers.
+- Improved recommendation copy and practical/best-available logic.
+- Added safer fallback recommendation behavior.
+- Improved skip behavior and details panel language.
+- Left the temporary DE logo in place to keep the live site stable.
+
+
 ## v0.2.3
 - Replaced the broken detailed illustrated icon with a clean temporary DE mark.
 - Kept the green brand theme.

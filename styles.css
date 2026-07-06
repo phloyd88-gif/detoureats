@@ -344,3 +344,24 @@ button:disabled {
   .score { font-size: 82px; }
   .place-name { font-size: 34px; }
 }
+
+
+/* v0.3 refinements */
+.badge.bucket {
+  background: #fef3c7;
+  color: #854d0e;
+}
+.badge.strong {
+  background: #dcfce7;
+  color: #14532d;
+}
+.lead-copy {
+  color: var(--muted);
+  font-weight: 750;
+  line-height: 1.35;
+}
+.decision-card .empty p {
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.35;
+}

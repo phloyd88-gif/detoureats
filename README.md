@@ -1,4 +1,4 @@
-# DetourEats App v0.2.3
+# DetourEats App v0.3
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -66,3 +66,27 @@ If the service worker caches the old version, hard refresh the browser or unregi
 
 ## v0.2.3 note
 The illustrated icon was replaced with a clean temporary DE mark so the live site looks stable while the final logo is still being developed.
+
+
+## v0.3 focus
+
+This version improves the product behavior without changing the live logo direction.
+
+New / improved:
+- Clearer trip states:
+  - Keep Driving
+  - Found Something
+  - This Is Your Stop
+  - Bucket List Stop
+  - Best Available
+- Stronger recommendation language.
+- Better "why this stop" copy.
+- Better fallback behavior if the recommendation engine changes.
+- Cleaner handling of skipped recommendations.
+- Keeps debug controls hidden from normal user flow.
+
+Still simulated:
+- Route data
+- Restaurant data
+- ETA / added trip time
+- Live hours

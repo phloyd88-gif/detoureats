@@ -1,36 +1,21 @@
-const state = {
-  settings: {
-    destination: "Myrtle Beach, SC",
-    routePosition: 0,
-    candidatePool: "All",
-    corridor: "All",
-    lookahead: 5,
-    travelDay: "monday",
-    hoursMode: "requireOpen",
-    mealMode: "auto",
-    currentTime: 480,
-    mealType: "lunch",
-    maxAdded: 10,
-    tripMode: "balanced",
-    hideChains: true
-  },
-  latestResult: null,
-  skippedNames: new Set()
-};
+/* DetourEats v0.3 app layer
+   Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
+*/
 
 const els = {
   setupScreen: document.getElementById("setupScreen"),
   driveScreen: document.getElementById("driveScreen"),
   destinationInput: document.getElementById("destinationInput"),
-  currentTimeInput: document.getElementById("currentTimeInput"),
   maxAddedInput: document.getElementById("maxAddedInput"),
   tripModeInput: document.getElementById("tripModeInput"),
+  currentTimeInput: document.getElementById("currentTimeInput"),
   startTripButton: document.getElementById("startTripButton"),
   enableNotificationsButton: document.getElementById("enableNotificationsButton"),
   backButton: document.getElementById("backButton"),
   tripTitle: document.getElementById("tripTitle"),
   tripSubtitle: document.getElementById("tripSubtitle"),
   decisionCard: document.getElementById("decisionCard"),
+  detailsPanel: document.getElementById("detailsPanel"),
   takeMeThereButton: document.getElementById("takeMeThereButton"),
   skipButton: document.getElementById("skipButton"),
   routePositionInput: document.getElementById("routePositionInput"),
@@ -38,185 +23,481 @@ const els = {
   lookaheadInput: document.getElementById("lookaheadInput"),
   candidatePoolInput: document.getElementById("candidatePoolInput"),
   hoursModeInput: document.getElementById("hoursModeInput"),
-  detailsPanel: document.getElementById("detailsPanel"),
   upcomingPanel: document.getElementById("upcomingPanel"),
   toast: document.getElementById("toast"),
   demoToggleButton: document.getElementById("demoToggleButton"),
   debugPanel: document.getElementById("debugPanel")
 };
 
-function routePositionLabel(pos) {
-  if (pos === 0) return "Start of route";
-  const candidate = candidates.find(c => c.seq === pos);
-  return candidate ? `Past ${candidate.name}` : `${pos} stops into route`;
+let state = {
+  started: false,
+  destination: "Myrtle Beach, SC",
+  maxAdded: 10,
+  tripMode: "balanced",
+  currentTime: 480,
+  routePosition: 0,
+  lookahead: 5,
+  candidatePool: "All",
+  hoursMode: "requireOpen",
+  skippedIds: new Set(),
+  currentPick: null,
+  currentResult: null,
+  notificationsEnabled: false
+};
+
+function getCandidates() {
+  if (Array.isArray(window.DETOUR_EATS_CANDIDATES)) return window.DETOUR_EATS_CANDIDATES;
+  if (Array.isArray(window.candidates)) return window.candidates;
+  if (Array.isArray(window.restaurants)) return window.restaurants;
+  return [];
 }
 
-function updateSettingsFromControls() {
-  state.settings.destination = els.destinationInput.value.trim() || "your destination";
-  state.settings.currentTime = Number(els.currentTimeInput.value);
-  state.settings.maxAdded = Number(els.maxAddedInput.value);
-  state.settings.tripMode = els.tripModeInput.value;
-  state.settings.routePosition = Number(els.routePositionInput.value);
-  state.settings.lookahead = Number(els.lookaheadInput.value);
-  state.settings.candidatePool = els.candidatePoolInput.value;
-  state.settings.hoursMode = els.hoursModeInput.value;
-}
+function getEngineResult() {
+  const candidates = getCandidates();
 
-function filteredCandidates() {
-  return candidates.filter(c => !state.skippedNames.has(c.name));
-}
-
-function showToast(title, body) {
-  els.toast.innerHTML = `<strong>${title}</strong><span>${body}</span>`;
-  els.toast.classList.remove("hidden");
-  setTimeout(() => els.toast.classList.add("hidden"), 5500);
-
-  if ("Notification" in window && Notification.permission === "granted") {
-    new Notification(title, { body, icon: "icons/icon-192.svg" });
+  if (window.DetourEngine && typeof window.DetourEngine.recommend === "function") {
+    return window.DetourEngine.recommend({
+      candidates,
+      maxAddedMinutes: state.maxAdded,
+      maxAdded: state.maxAdded,
+      currentTime: state.currentTime,
+      currentMinute: state.currentTime,
+      routePosition: state.routePosition,
+      lookahead: state.lookahead,
+      candidatePool: state.candidatePool,
+      hoursMode: state.hoursMode,
+      tripMode: state.tripMode,
+      skippedIds: state.skippedIds
+    });
   }
+
+  if (typeof window.getRecommendation === "function") {
+    return window.getRecommendation({
+      candidates,
+      maxAddedMinutes: state.maxAdded,
+      currentTime: state.currentTime,
+      routePosition: state.routePosition,
+      lookahead: state.lookahead,
+      candidatePool: state.candidatePool,
+      hoursMode: state.hoursMode,
+      tripMode: state.tripMode,
+      skippedIds: state.skippedIds
+    });
+  }
+
+  // Fallback scoring if engine.js API changes or is unavailable.
+  const visible = candidates
+    .filter(c => !state.skippedIds.has(String(c.id ?? c.name)))
+    .filter(c => passesPool(c))
+    .filter(c => Number(c.sequence ?? c.routeIndex ?? 0) >= state.routePosition)
+    .slice(0, state.lookahead === 99 ? 999 : state.lookahead)
+    .map(c => ({...c, _score: fallbackScore(c)}))
+    .sort((a, b) => b._score - a._score);
+
+  return {
+    pick: visible[0] || null,
+    upcoming: visible.slice(0, 5),
+    reason: visible[0] ? "recommended" : "no_candidates"
+  };
 }
 
-function notificationCopy(result) {
-  if (!result.pick) {
+function passesPool(c) {
+  if (state.candidatePool === "All") return true;
+  const tags = [
+    c.category,
+    c.bucket,
+    c.type,
+    c.segment,
+    ...(Array.isArray(c.tags) ? c.tags : [])
+  ].filter(Boolean).map(x => String(x).toLowerCase());
+  return tags.some(t => t.includes(state.candidatePool.toLowerCase()));
+}
+
+function fallbackScore(c) {
+  const quality = Number(c.quality ?? c.ratingScore ?? c.score ?? 75);
+  const added = Number(c.addedMinutes ?? c.addedTime ?? c.detourMinutes ?? 12);
+  const independentBonus = c.chain ? -8 : 5;
+  const tripPenalty = Math.max(0, added - state.maxAdded) * 3;
+  return Math.round(Math.max(0, Math.min(99, quality + independentBonus - tripPenalty)));
+}
+
+function normalizePick(rawPick) {
+  if (!rawPick) return null;
+  const score =
+    rawPick.detourScore ??
+    rawPick.tripScore ??
+    rawPick.score ??
+    rawPick._score ??
+    82;
+
+  const added =
+    rawPick.addedMinutes ??
+    rawPick.addedTime ??
+    rawPick.detourMinutes ??
+    rawPick.extraMinutes ??
+    10;
+
+  const name = rawPick.name ?? rawPick.restaurant ?? "Recommended Stop";
+  const signature = rawPick.signatureDish ?? rawPick.famousFor ?? rawPick.tagline ?? rawPick.summary ?? "Local food worth considering.";
+  const arrival = rawPick.arrivalTime ?? rawPick.eta ?? estimateArrival(rawPick);
+  const open = rawPick.openAtArrival ?? rawPick.isOpen ?? true;
+  const chain = Boolean(rawPick.chain);
+  const id = String(rawPick.id ?? rawPick.name ?? Math.random());
+
+  return {
+    ...rawPick,
+    id,
+    name,
+    score: Math.round(Number(score)),
+    added: Number(added),
+    signature,
+    arrival,
+    open,
+    chain
+  };
+}
+
+function estimateArrival(pick) {
+  const seq = Number(pick.sequence ?? pick.routeIndex ?? state.routePosition);
+  const minutesAhead = Math.max(0, seq - state.routePosition) * 45;
+  return formatMinutesOfDay(state.currentTime + minutesAhead);
+}
+
+function formatMinutesOfDay(total) {
+  let mins = ((Number(total) % 1440) + 1440) % 1440;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const hour12 = h % 12 || 12;
+  const ampm = h < 12 ? "AM" : "PM";
+  return `${hour12}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+function getMealWindowLabel() {
+  const t = Number(state.currentTime);
+  if (t < 600) return "breakfast";
+  if (t < 900) return "lunch";
+  if (t < 1080) return "dinner";
+  return "late bite";
+}
+
+function getTripState(pick, result) {
+  const position = Number(state.routePosition);
+  const meal = getMealWindowLabel();
+
+  if (!pick) {
     return {
-      title: "Keep driving",
-      body: "Nothing worth interrupting you for in the current window."
+      key: "keep-driving",
+      label: "Keep Driving",
+      headline: "Nothing worth stopping for yet.",
+      subline: "We’re still watching ahead.",
+      badgeClass: "wait"
     };
   }
-  const p = result.pick;
-  const tier = result.tier.label;
 
-  if (tier === "Worth the Detour") {
+  if (pick.score >= 97) {
     return {
-      title: "Worth the Detour ahead",
-      body: `${p.name} · Score ${p.score} · adds ${p.estimatedAddedMinutes} min · open at ${p.arrivalClock}.`
+      key: "bucket-list",
+      label: "Bucket List Stop",
+      headline: "This is rare.",
+      subline: "We’d change the plan for this one.",
+      badgeClass: "bucket"
     };
   }
 
-  if (tier === "Best Breakfast Ahead") {
+  if (pick.score >= 92) {
     return {
-      title: "Best breakfast ahead",
-      body: `${p.name} · adds ${p.estimatedAddedMinutes} min · ${p.hours.label.toLowerCase()}.`
+      key: "this-is-your-stop",
+      label: "This Is Your Stop",
+      headline: "We’d stop here.",
+      subline: `Best ${meal} decision on this stretch.`,
+      badgeClass: "strong"
+    };
+  }
+
+  if (pick.score >= 84) {
+    return {
+      key: "found-something",
+      label: "Found Something",
+      headline: "Good stop ahead.",
+      subline: "Not bucket-list, but it fits this trip.",
+      badgeClass: "practical"
     };
   }
 
   return {
-    title: tier,
-    body: `${p.name} · Score ${p.score} · adds ${p.estimatedAddedMinutes} min.`
+    key: "best-available",
+    label: "Best Available",
+    headline: "This is the best available option.",
+    subline: "Not legendary, but it beats guessing at the next exit.",
+    badgeClass: "practical"
   };
 }
 
-function renderDecision() {
-  const result = recommend(filteredCandidates(), state.settings);
-  state.latestResult = result;
+function getRecommendationTier(pick) {
+  if (!pick) return "Keep Driving";
+  if (pick.score >= 97) return "Bucket List Stop";
+  if (pick.score >= 92) return "Worth the Detour";
+  if (pick.score >= 84) return "Best Stop Ahead";
+  return "Best Available";
+}
 
-  els.routePositionLabel.textContent = routePositionLabel(state.settings.routePosition);
-  els.tripTitle.textContent = `Driving to ${state.settings.destination}`;
-  els.tripSubtitle.textContent = "Running quietly in the background";
+function getRecommendationCopy(pick, tripState) {
+  if (!pick) {
+    return {
+      lead: "Keep driving.",
+      rationale: [
+        "No stop in the current lookahead window clears the bar.",
+        "DetourEats is still watching the route.",
+        "When there’s a better food decision ahead, we’ll surface it."
+      ]
+    };
+  }
 
-  const p = result.pick;
-  if (!p) {
+  const rationale = [];
+
+  if (!pick.chain) rationale.push("Independent/local option — not a default chain stop.");
+  if (pick.added <= state.maxAdded) rationale.push(`Adds ${pick.added} minutes, within your ${state.maxAdded}-minute limit.`);
+  else rationale.push(`Adds ${pick.added} minutes, slightly above your normal limit, but the food case is stronger.`);
+  rationale.push(pick.signature);
+
+  if (tripState.key === "best-available") {
+    rationale.unshift("This is a practical recommendation, not a bucket-list claim.");
+  }
+
+  if (pick.open === false) {
+    rationale.unshift("Warning: this may not be open at your estimated arrival.");
+  }
+
+  return {
+    lead: tripState.headline,
+    rationale
+  };
+}
+
+function render() {
+  if (!state.started) return;
+
+  const result = getEngineResult() || {};
+  const pick = normalizePick(result.pick || result.recommendation || result.best || result.currentPick);
+  const upcoming = (result.upcoming || result.candidates || []).map(normalizePick).filter(Boolean);
+
+  state.currentPick = pick;
+  state.currentResult = result;
+
+  const trip = getTripState(pick, result);
+  const copy = getRecommendationCopy(pick, trip);
+
+  els.tripTitle.textContent = state.destination || "Your trip";
+  els.tripSubtitle.textContent = trip.label;
+
+  renderDecisionCard(pick, trip, copy);
+  renderDetailsPanel(pick, trip, copy);
+  renderUpcoming(upcoming.length ? upcoming : getFallbackUpcoming(pick));
+
+  if (els.routePositionLabel) {
+    els.routePositionLabel.textContent = describeRoutePosition();
+  }
+
+  els.takeMeThereButton.disabled = !pick;
+  els.takeMeThereButton.textContent = pick ? "Take Me There" : "Keep Watching";
+}
+
+function renderDecisionCard(pick, trip, copy) {
+  if (!pick) {
     els.decisionCard.innerHTML = `
+      <div class="badge ${trip.badgeClass}">${trip.label}</div>
       <div class="empty">
-        <div class="badge wait">Keep Driving</div>
-        <h2>Nothing worth stopping for yet.</h2>
-        <p>We would keep watching and check again as the route changes.</p>
+        <h2>${trip.headline}</h2>
+        <p>${trip.subline}</p>
+        <div class="fact-grid">
+          <div class="fact highlight">
+            <strong>Looking ahead</strong>
+            <span>We’ll only interrupt when the stop is worth it.</span>
+          </div>
+        </div>
       </div>
     `;
-    els.takeMeThereButton.disabled = true;
-    els.detailsPanel.innerHTML = `
-      <h2>Why no pick?</h2>
-      <p class="hint">No eligible candidate is open at arrival, within the lookahead window, and inside your added-time settings.</p>
-    `;
-    els.upcomingPanel.innerHTML = "";
     return;
   }
 
-  els.takeMeThereButton.disabled = false;
+  const tier = getRecommendationTier(pick);
+  const openLabel = pick.open ? "Open at arrival" : "Check hours";
+  const chainLabel = pick.chain ? "Chain / known brand" : "Independent/local";
 
-  const badgeClass = result.tier.className ? `badge ${result.tier.className}` : "badge";
   els.decisionCard.innerHTML = `
-    <div class="${badgeClass}">${result.tier.label}</div>
+    <div class="badge ${trip.badgeClass}">${tier}</div>
     <p class="score-label">Detour Score</p>
-    <div class="score">${p.score}</div>
-    <h2 class="place-name">${p.name}</h2>
-    <p class="meta">${p.cuisine} · ${p.price}</p>
+    <div class="score">${pick.score}</div>
+    <h2 class="place-name">${escapeHtml(pick.name)}</h2>
+    <p class="meta">${trip.subline}</p>
+
     <div class="fact-grid">
-      <div class="fact"><strong>${p.estimatedAddedMinutes} min</strong><span>estimated added trip time</span></div>
-      <div class="fact highlight"><strong>${p.famousFor}</strong><span>famous for</span></div>
-      <div class="fact"><strong>${p.arrivalClock}</strong><span>arrival · ${p.autoMeal} · fit ${p.mealFit}/10</span></div>
-      <div class="fact"><strong>${p.hours.label}</strong><span>${p.hours.display}</span></div>
+      <div class="fact highlight">
+        <strong>Adds ${pick.added} min</strong>
+        <span>to your trip</span>
+      </div>
+      <div class="fact">
+        <strong>${escapeHtml(openLabel)}</strong>
+        <span>ETA ${escapeHtml(String(pick.arrival))}</span>
+      </div>
+      <div class="fact">
+        <strong>${escapeHtml(chainLabel)}</strong>
+        <span>${escapeHtml(pick.signature)}</span>
+      </div>
     </div>
   `;
+}
+
+function renderDetailsPanel(pick, trip, copy) {
+  const rationale = copy.rationale || [];
+  if (!pick) {
+    els.detailsPanel.innerHTML = `
+      <h2>What DetourEats is doing</h2>
+      <ul class="details-list">
+        ${rationale.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>
+    `;
+    return;
+  }
 
   els.detailsPanel.innerHTML = `
-    <h2>Why this pick?</h2>
-    <p>${p.evidenceSummary || "This candidate has the best combination of evidence, trip fit, meal fit, and open-at-arrival status."}</p>
+    <h2>Why this stop</h2>
+    <p class="lead-copy">${escapeHtml(copy.lead)}</p>
     <ul class="details-list">
-      <li><strong>Candidate type:</strong> ${p.candidateType}</li>
-      <li><strong>City:</strong> ${p.city}</li>
-      <li><strong>Route segment:</strong> ${p.segment}</li>
-      <li><strong>Internet evidence:</strong> ${p.evidence}/10</li>
-      <li><strong>Meal fit:</strong> ${p.mealFit}/10</li>
-      <li><strong>Hours:</strong> ${p.hours.label} (${p.hours.display})</li>
+      ${rationale.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
     </ul>
-    ${(p.sources || []).length ? `<h3>Sources</h3><ul class="details-list">${p.sources.map(src => `<li><a href="${src}" target="_blank">${src}</a></li>`).join("")}</ul>` : ""}
   `;
+}
+
+function renderUpcoming(items) {
+  if (!els.upcomingPanel) return;
+
+  const rows = items.slice(0, 5).map(item => `
+    <div class="stop-row">
+      <div class="mini-score">${item.score}</div>
+      <div>
+        <strong>${escapeHtml(item.name)}</strong>
+        <span>${getRecommendationTier(item)} · adds ${item.added} min · ${escapeHtml(item.signature)}</span>
+      </div>
+    </div>
+  `).join("");
 
   els.upcomingPanel.innerHTML = `
-    <h2>Upcoming Worthy Stops</h2>
-    <p class="hint">These are ranked within the current lookahead window.</p>
-    ${result.upcoming.map((item, idx) => `
-      <div class="stop-row">
-        <div class="mini-score">${item.score}</div>
-        <div>
-          <strong>${idx + 1}. ${item.name}</strong>
-          <span>${item.city} · ${item.arrivalClock} ${item.autoMeal} · ${item.hours.label} · adds ${item.estimatedAddedMinutes} min</span>
-        </div>
-      </div>
-    `).join("")}
+    <h2>Upcoming candidates</h2>
+    <p class="hint">Debug view. Hidden from the main user experience.</p>
+    ${rows || `<p class="hint">No remaining candidates in this demo window.</p>`}
   `;
+}
+
+function getFallbackUpcoming(currentPick) {
+  return getCandidates()
+    .filter(c => !currentPick || String(c.id ?? c.name) !== currentPick.id)
+    .filter(c => !state.skippedIds.has(String(c.id ?? c.name)))
+    .slice(0, 5)
+    .map(normalizePick)
+    .filter(Boolean);
+}
+
+function describeRoutePosition() {
+  const n = Number(state.routePosition);
+  if (n === 0) return "Start of route";
+  if (n < 8) return "Early trip";
+  if (n < 16) return "Mid-trip";
+  return "Late trip";
+}
+
+function showToast(title, message) {
+  if (!els.toast) return;
+  els.toast.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
+  els.toast.classList.remove("hidden");
+  setTimeout(() => els.toast.classList.add("hidden"), 4500);
 }
 
 function startTrip() {
-  updateSettingsFromControls();
+  state.started = true;
+  state.destination = els.destinationInput.value || "your destination";
+  state.maxAdded = Number(els.maxAddedInput.value);
+  state.tripMode = els.tripModeInput.value;
+  state.currentTime = Number(els.currentTimeInput.value);
+  state.routePosition = Number(els.routePositionInput?.value || 0);
+  state.lookahead = Number(els.lookaheadInput?.value || 5);
+  state.candidatePool = els.candidatePoolInput?.value || "All";
+  state.hoursMode = els.hoursModeInput?.value || "requireOpen";
+  state.skippedIds = new Set();
+
   els.setupScreen.classList.add("hidden");
   els.driveScreen.classList.remove("hidden");
-  renderDecision();
 
-  const copy = notificationCopy(state.latestResult);
-  showToast(copy.title, copy.body);
+  render();
+  showToast("Trust Us Mode is on", "We’ll keep the main screen simple and only surface the best decision.");
 }
 
-function openMapsForPick() {
-  const p = state.latestResult?.pick;
-  if (!p) return;
-
-  const query = encodeURIComponent(`${p.name} ${p.city}`);
-  window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, "_blank", "noopener");
+function goBack() {
+  state.started = false;
+  els.driveScreen.classList.add("hidden");
+  els.setupScreen.classList.remove("hidden");
 }
 
 function skipPick() {
-  const p = state.latestResult?.pick;
-  if (!p) return;
-  state.skippedNames.add(p.name);
-  renderDecision();
-  const copy = notificationCopy(state.latestResult);
-  showToast("Skipped", copy.body);
+  if (state.currentPick) {
+    state.skippedIds.add(state.currentPick.id);
+    showToast("Skipped", "We’ll look for the next best option.");
+  }
+  render();
 }
 
-async function requestNotifications() {
-  if (!("Notification" in window)) {
-    showToast("Notifications unavailable", "This browser does not support web notifications.");
+function takeMeThere() {
+  const pick = state.currentPick;
+  if (!pick) {
+    showToast("Still watching", "No stop is worth interrupting you for yet.");
     return;
   }
 
-  const result = await Notification.requestPermission();
-  if (result === "granted") {
-    showToast("Notifications enabled", "DetourEats can now show test trip alerts in this browser.");
-  } else {
-    showToast("Notifications not enabled", "You can still use the in-app alerts.");
+  const query = encodeURIComponent(pick.name);
+  const url = pick.mapsUrl || pick.url || `https://www.google.com/maps/search/?api=1&query=${query}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function enableNotifications() {
+  if (!("Notification" in window)) {
+    showToast("Notifications unavailable", "This browser does not support notifications.");
+    return;
   }
+
+  const permission = await Notification.requestPermission();
+  state.notificationsEnabled = permission === "granted";
+
+  if (state.notificationsEnabled) {
+    new Notification("DetourEats", {
+      body: "Test notification enabled. We’ll tell you when food is worth the stop.",
+      icon: "icons/icon-192.svg"
+    });
+  } else {
+    showToast("Notifications not enabled", "You can still use the demo without notifications.");
+  }
+}
+
+function updateFromControls() {
+  state.routePosition = Number(els.routePositionInput?.value || 0);
+  state.lookahead = Number(els.lookaheadInput?.value || 5);
+  state.candidatePool = els.candidatePoolInput?.value || "All";
+  state.hoursMode = els.hoursModeInput?.value || "requireOpen";
+  state.currentTime = Number(els.currentTimeInput?.value || state.currentTime);
+  render();
+}
+
+function toggleDemoControls() {
+  const hidden = els.debugPanel.classList.toggle("hidden");
+  els.demoToggleButton.textContent = hidden ? "Show Demo Controls" : "Hide Demo Controls";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function registerServiceWorker() {
@@ -226,18 +507,11 @@ function registerServiceWorker() {
 }
 
 els.startTripButton.addEventListener("click", startTrip);
-els.enableNotificationsButton.addEventListener("click", requestNotifications);
-els.backButton.addEventListener("click", () => {
-  els.driveScreen.classList.add("hidden");
-  els.setupScreen.classList.remove("hidden");
-});
-els.takeMeThereButton.addEventListener("click", openMapsForPick);
+els.backButton.addEventListener("click", goBack);
 els.skipButton.addEventListener("click", skipPick);
-
-els.demoToggleButton.addEventListener("click", () => {
-  const hidden = els.debugPanel.classList.toggle("hidden");
-  els.demoToggleButton.textContent = hidden ? "Show Demo Controls" : "Hide Demo Controls";
-});
+els.takeMeThereButton.addEventListener("click", takeMeThere);
+els.enableNotificationsButton.addEventListener("click", enableNotifications);
+els.demoToggleButton.addEventListener("click", toggleDemoControls);
 
 [
   els.routePositionInput,
@@ -248,13 +522,12 @@ els.demoToggleButton.addEventListener("click", () => {
   els.maxAddedInput,
   els.tripModeInput
 ].forEach(el => {
+  if (!el) return;
   el.addEventListener("input", () => {
-    updateSettingsFromControls();
-    renderDecision();
+    if (state.started) updateFromControls();
   });
   el.addEventListener("change", () => {
-    updateSettingsFromControls();
-    renderDecision();
+    if (state.started) updateFromControls();
   });
 });
 
