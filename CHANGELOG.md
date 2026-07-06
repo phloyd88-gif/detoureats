@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.2
+- Replaced weak Best Available copy that implied the driver was still guessing.
+- Updated wording to reinforce that DetourEats makes the decision.
+
+
 ## v0.3.1
 - Fixed data/engine wiring bug causing the app to show only Keep Driving.
 - Explicitly exposed candidate data to the browser window.

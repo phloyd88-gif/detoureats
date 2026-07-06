@@ -243,7 +243,7 @@ function getTripState(pick, result) {
     key: "best-available",
     label: "Best Available",
     headline: "This is the best available option.",
-    subline: "Not legendary, but it beats guessing at the next exit.",
+    subline: "Not legendary, but it is the best call for this stretch.",
     badgeClass: "practical"
   };
 }
@@ -276,7 +276,7 @@ function getRecommendationCopy(pick, tripState) {
   rationale.push(pick.signature);
 
   if (tripState.key === "best-available") {
-    rationale.unshift("This is a practical recommendation, not a bucket-list claim.");
+    rationale.unshift("This is the strongest available stop for this part of the trip.");
   }
 
   if (pick.open === false) {

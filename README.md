@@ -1,4 +1,4 @@
-# DetourEats App v0.3.1
+# DetourEats App v0.3.2
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -97,3 +97,9 @@ Still simulated:
 - Fixed candidate data not being available to the app layer in some browser deployments.
 - Fixed field-name mismatches between app.js and data.js.
 - Fixed issue where the app could show "Keep Driving" immediately even though prototype candidates exist.
+
+
+## v0.3.2 copy fix
+
+- Removed language implying the driver has to guess.
+- Updated Best Available language to reinforce the product promise: DetourEats makes the call.
