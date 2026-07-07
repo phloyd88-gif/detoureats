@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6
+- Added meal urgency states.
+- Added route-scarcity analysis.
+- Added stop-now, eat-soon, and keep-driving decision messaging.
+- Added trip-context details showing urgency and route outlook.
+
+
 ## v0.5.2
 - Fixed Hungry Soon still selecting Bonnie Blue.
 - Added a real earlier open stop in Binghamton.

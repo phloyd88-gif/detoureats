@@ -199,6 +199,24 @@ function getTripState(pick, result) {
   const position = Number(state.routePosition);
   const meal = getMealWindowLabel();
 
+  if (result?.decision) {
+    const d = result.decision;
+    const labels = {
+      "stop-now": "Stop Now",
+      "eat-soon": "Eat Soon",
+      "keep-driving": "Keep Driving",
+      "good-stop": "Found Something"
+    };
+
+    return {
+      key: d.state,
+      label: labels[d.state] || "Found Something",
+      headline: d.headline,
+      subline: d.detail,
+      badgeClass: d.state === "stop-now" ? "strong" : d.state === "keep-driving" ? "wait" : "practical"
+    };
+  }
+
   if (!pick) {
     return {
       key: "keep-driving",
@@ -423,6 +441,15 @@ function renderDetailsPanel(pick, trip, copy) {
       <div class="trust-row"><span>Data confidence</span><strong>${escapeHtml(pick.confidence || "Medium")}</strong></div>
       <div class="trust-row"><span>Last checked</span><strong>${escapeHtml(pick.verifiedDate || "Prototype dataset")}</strong></div>
       ${sourceLink}
+    </div>
+
+    <div class="context-section">
+      <h3>Trip context</h3>
+      <div class="context-grid">
+        <div><span>Meal urgency</span><strong>${escapeHtml(state.currentResult?.urgency?.level || "No rush")}</strong></div>
+        <div><span>Route outlook</span><strong>${escapeHtml(state.currentResult?.routeContext?.level || "Unknown")}</strong></div>
+      </div>
+      <p>${escapeHtml(state.currentResult?.routeContext?.message || "")}</p>
     </div>
 
     <div class="editorial-section">

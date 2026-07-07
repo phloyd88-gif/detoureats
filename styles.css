@@ -465,3 +465,47 @@ button:disabled {
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+
+/* v0.6 meal urgency and route scarcity */
+.context-section {
+  margin-top: 18px;
+  padding: 15px;
+  border-radius: 16px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+.context-section h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.context-section p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+  font-size: 13px;
+}
+.context-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.context-grid div {
+  background: white;
+  border: 1px solid #dcfce7;
+  border-radius: 12px;
+  padding: 10px;
+}
+.context-grid span,
+.context-grid strong {
+  display: block;
+}
+.context-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+.context-grid strong {
+  margin-top: 3px;
+  font-size: 14px;
+}

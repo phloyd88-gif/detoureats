@@ -1,4 +1,4 @@
-# DetourEats App v0.5.2
+# DetourEats App v0.6
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -161,3 +161,24 @@ The trip style now materially changes scoring:
 - Added Park Diner & Restaurant in Binghamton as a real earlier open corridor stop.
 - Hungry Soon now selects the earliest open candidate that clears a minimum quality bar.
 - This is a decision rule, not merely a small scoring preference.
+
+
+## v0.6: Meal urgency and route scarcity
+
+Added:
+- Meal urgency states:
+  - No rush
+  - Start looking
+  - Eat soon
+  - Stop now
+- Route scarcity analysis:
+  - Healthy
+  - Better later
+  - Limited
+  - Sparse
+  - Last strong option
+- Decision language that explains whether to:
+  - keep driving
+  - eat soon
+  - stop now
+- Trip-context panel showing urgency and route outlook

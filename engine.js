@@ -22,6 +22,9 @@ It is restaurant quality filtered through trip fit.
       .map(candidate => scoreCandidate(candidate, settings, normalized))
       .sort((a, b) => b.detourScore - a.detourScore);
 
+    const urgency = calculateMealUrgency(settings);
+    const routeContext = analyzeRouteScarcity(scored, settings);
+
     let pick = scored[0] || null;
 
     const style = String(settings.tripMode || "balanced").toLowerCase();
@@ -42,12 +45,17 @@ It is restaurant quality filtered through trip fit.
       }
     }
 
+    const decision = buildDecisionMessage(pick, scored, urgency, routeContext, settings);
+
     return {
       pick,
       upcoming: scored.slice(0, 6),
       evaluated: scored,
       explanation: pick ? pick.scoreExplanation : null,
-      reason: pick ? "recommended" : "no_candidate_available"
+      reason: pick ? "recommended" : "no_candidate_available",
+      urgency,
+      routeContext,
+      decision
     };
   }
 
@@ -268,6 +276,178 @@ It is restaurant quality filtered through trip fit.
     if (distanceAhead <= 2) return 94;
     if (distanceAhead <= 4) return 84;
     return 68;
+  }
+
+  function calculateMealUrgency(settings) {
+    const currentTime = number(settings.currentTime, 720);
+    const mealType = String(settings.mealType || "").toLowerCase();
+
+    let level = "No rush";
+    let score = 35;
+    let explanation = "You are outside a typical meal-pressure window.";
+
+    if (mealType.includes("breakfast")) {
+      if (currentTime >= 510 && currentTime <= 660) {
+        level = "Eat soon";
+        score = 82;
+        explanation = "You are in a strong breakfast window.";
+      } else if (currentTime > 660 && currentTime <= 750) {
+        level = "Stop now";
+        score = 96;
+        explanation = "Breakfast options may start narrowing soon.";
+      }
+    } else if (mealType.includes("lunch")) {
+      if (currentTime >= 660 && currentTime <= 780) {
+        level = "Start looking";
+        score = 65;
+        explanation = "Lunch timing is approaching.";
+      } else if (currentTime > 780 && currentTime <= 900) {
+        level = "Eat soon";
+        score = 85;
+        explanation = "You are in the main lunch window.";
+      } else if (currentTime > 900 && currentTime <= 990) {
+        level = "Stop now";
+        score = 97;
+        explanation = "You are late in the lunch window.";
+      }
+    } else if (mealType.includes("dinner")) {
+      if (currentTime >= 990 && currentTime <= 1080) {
+        level = "Start looking";
+        score = 64;
+        explanation = "Dinner timing is approaching.";
+      } else if (currentTime > 1080 && currentTime <= 1230) {
+        level = "Eat soon";
+        score = 86;
+        explanation = "You are in the main dinner window.";
+      } else if (currentTime > 1230) {
+        level = "Stop now";
+        score = 98;
+        explanation = "Late-night options may become sparse.";
+      }
+    } else if (currentTime >= 720 && currentTime <= 900) {
+      level = "Eat soon";
+      score = 80;
+      explanation = "You are in a common lunch period.";
+    } else if (currentTime >= 1080 && currentTime <= 1230) {
+      level = "Eat soon";
+      score = 82;
+      explanation = "You are in a common dinner period.";
+    }
+
+    return { level, score, explanation };
+  }
+
+  function analyzeRouteScarcity(scored, settings) {
+    if (!scored.length) {
+      return {
+        level: "Sparse",
+        strongOptionsAhead: 0,
+        nextStrongSeq: null,
+        message: "No strong open options are currently available in the lookahead window."
+      };
+    }
+
+    const strong = scored
+      .filter(c => c.detourScore >= 88 && c.openAtArrival !== false)
+      .sort((a, b) => a.seq - b.seq);
+
+    const acceptable = scored
+      .filter(c => c.detourScore >= 76 && c.openAtArrival !== false)
+      .sort((a, b) => a.seq - b.seq);
+
+    if (strong.length === 0) {
+      return {
+        level: acceptable.length ? "Limited" : "Sparse",
+        strongOptionsAhead: 0,
+        nextStrongSeq: null,
+        message: acceptable.length
+          ? "There are usable stops ahead, but no standout option in this stretch."
+          : "Food options become weak in this stretch."
+      };
+    }
+
+    const first = strong[0];
+    const routePosition = number(settings.routePosition, 0);
+    const segmentsAway = Math.max(0, first.seq - routePosition);
+
+    if (strong.length === 1 && segmentsAway <= 2) {
+      return {
+        level: "Last strong option",
+        strongOptionsAhead: 1,
+        nextStrongSeq: first.seq,
+        message: "This may be the last strong option for a while."
+      };
+    }
+
+    if (segmentsAway >= 4) {
+      return {
+        level: "Better later",
+        strongOptionsAhead: strong.length,
+        nextStrongSeq: first.seq,
+        message: "A stronger option exists later, but it is not close."
+      };
+    }
+
+    return {
+      level: "Healthy",
+      strongOptionsAhead: strong.length,
+      nextStrongSeq: first.seq,
+      message: "Several strong options remain in the current route window."
+    };
+  }
+
+  function buildDecisionMessage(pick, scored, urgency, routeContext, settings) {
+    if (!pick) {
+      return {
+        state: "keep-driving",
+        headline: "Keep driving.",
+        detail: "Nothing ahead currently clears the quality bar."
+      };
+    }
+
+    const laterBetter = scored
+      .filter(c => c.seq > pick.seq && c.detourScore >= pick.detourScore + 5 && c.openAtArrival !== false)
+      .sort((a, b) => a.seq - b.seq)[0];
+
+    if (urgency.level === "Stop now" || routeContext.level === "Last strong option") {
+      return {
+        state: "stop-now",
+        headline: "Stop here.",
+        detail: routeContext.level === "Last strong option"
+          ? "This is the last strong option for this stretch."
+          : urgency.explanation
+      };
+    }
+
+    if (urgency.level === "Eat soon" && pick.detourScore >= 80) {
+      return {
+        state: "eat-soon",
+        headline: "Eat soon.",
+        detail: routeContext.message
+      };
+    }
+
+    if (laterBetter && urgency.score < 80) {
+      return {
+        state: "keep-driving",
+        headline: "Keep driving.",
+        detail: `A stronger option is coming up later: ${laterBetter.name}.`
+      };
+    }
+
+    if (routeContext.level === "Sparse" || routeContext.level === "Limited") {
+      return {
+        state: "stop-now",
+        headline: "Stop here.",
+        detail: routeContext.message
+      };
+    }
+
+    return {
+      state: "good-stop",
+      headline: "Good stop ahead.",
+      detail: "This is the best decision for the current stretch."
+    };
   }
 
   function tierForScore(score) {
