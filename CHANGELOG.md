@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.8.2 Route Pipeline Repair
+- Replaced whole-route Overpass queries with independently cached route-section searches.
+- Retains successful partial restaurant results when other sections fail.
+- Rotates current public Overpass endpoints by route section.
+- Calculates restaurant distance to the actual route polyline rather than sparse sample points.
+- Added route progress and route-distribution projection for every restaurant.
+- Added OSRM Table matrix screening for up to 20 restaurant candidates in one request.
+- Limits individual route-through calls to the strongest and most geographically distributed candidates.
+- Retains matrix-estimated candidates when exact route confirmation times out.
+- Added explicit search outcome states for unavailable, empty, partial, failed routing, no qualifiers, and successful results.
+- Added route-section, mapped-record, matrix-screen, exact-route, and estimated-route counts.
+- Manual Recheck Route now forces a fresh segmented restaurant search.
+- Automatic location refresh retries restaurant discovery after service failure or an empty candidate pool.
+- Removed all remaining demo controls, demo labels, and standalone curated-list fallback behavior.
+- Removed the hard-coded Myrtle Beach geocode fallback.
+- Added matrix-estimate confidence disclosure to Restaurant Intelligence.
+
+
 ## v1.8.1 Hotfix
 - Removed the three prepopulated example-trip buttons.
 - Removes previously saved copies of the exact old demo trips from Recent Trips.

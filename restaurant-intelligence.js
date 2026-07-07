@@ -291,6 +291,14 @@
       );
     }
 
+    if (
+      candidate.routeCalculationMethod === "matrix"
+    ) {
+      gaps.push(
+        "Added time is a route-matrix estimate because exact detour confirmation did not finish."
+      );
+    }
+
     if (!candidate.phone) {
       gaps.push("No mapped phone number for direct confirmation.");
     }
@@ -329,6 +337,11 @@
     if (candidate.confidence === "Low") score -= 7;
     if (candidate.openAtArrival === false) score -= 10;
     if (candidate.backtracking) score -= 12;
+    if (
+      candidate.routeCalculationMethod === "matrix"
+    ) {
+      score -= 3;
+    }
 
     return clamp(Math.round(score), 25, 98);
   }

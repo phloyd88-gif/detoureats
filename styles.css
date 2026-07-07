@@ -2831,3 +2831,84 @@ button:disabled {
   display: inline-flex;
   margin-top: 8px;
 }
+
+
+/* v1.8.2 Route Pipeline Repair */
+.location-mode-badge.manual,
+.live-route-badge.waiting {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.route-pipeline-status {
+  margin: 12px 0 10px;
+  padding: 11px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 13px;
+  background: #f8fafc;
+}
+.route-pipeline-status strong,
+.route-pipeline-status p {
+  display: block;
+}
+.route-pipeline-status strong {
+  font-size: 11px;
+}
+.route-pipeline-status p {
+  margin: 4px 0 0;
+  font-size: 9px;
+  line-height: 1.4;
+}
+.pipeline-ready {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+.pipeline-partial {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+.pipeline-unavailable {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+.pipeline-empty {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+}
+
+.pipeline-count-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+  margin: 10px 0;
+}
+.pipeline-count-grid > div {
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: white;
+  border: 1px solid #e2e8f0;
+}
+.pipeline-count-grid span,
+.pipeline-count-grid strong {
+  display: block;
+}
+.pipeline-count-grid span {
+  color: #64748b;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+.pipeline-count-grid strong {
+  margin-top: 2px;
+  color: #0f172a;
+  font-size: 12px;
+}
+
+@media (max-width: 560px) {
+  .pipeline-count-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

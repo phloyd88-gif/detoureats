@@ -1,4 +1,4 @@
-/* DetourEats v1.8.1 Hotfix route-safety and responsiveness layer
+/* DetourEats v1.8.2 Route Pipeline Repair
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -102,15 +102,7 @@ const els = {
   priorityChips: Array.from(document.querySelectorAll("[data-priority]")),
   skipReasonPanel: document.getElementById("skipReasonPanel"),
   closeSkipPanelButton: document.getElementById("closeSkipPanelButton"),
-  routePositionInput: document.getElementById("routePositionInput"),
-  routePositionLabel: document.getElementById("routePositionLabel"),
-  lookaheadInput: document.getElementById("lookaheadInput"),
-  candidatePoolInput: document.getElementById("candidatePoolInput"),
-  hoursModeInput: document.getElementById("hoursModeInput"),
-  upcomingPanel: document.getElementById("upcomingPanel"),
-  toast: document.getElementById("toast"),
-  demoToggleButton: document.getElementById("demoToggleButton"),
-  debugPanel: document.getElementById("debugPanel")
+  toast: document.getElementById("toast")
 };
 
 let state = {
@@ -172,29 +164,24 @@ let state = {
 };
 
 function getCandidates() {
-  let candidates = [];
-
-  if (
+  const candidates =
     state.routingMode === "live" &&
     Array.isArray(state.liveCandidates)
-  ) {
-    candidates = state.liveCandidates;
-  } else if (Array.isArray(window.DETOUR_EATS_CANDIDATES)) {
-    candidates = window.DETOUR_EATS_CANDIDATES;
-  } else if (Array.isArray(window.candidates)) {
-    candidates = window.candidates;
-  } else if (Array.isArray(window.restaurants)) {
-    candidates = window.restaurants;
-  }
+      ? state.liveCandidates
+      : [];
 
   const intelligence =
     window.DetourEatsRestaurantIntelligence;
 
   return intelligence?.enrichCandidates
-    ? intelligence.enrichCandidates(candidates, {
-        now: Date.now(),
-        routeMode: state.routingMode
-      })
+    ? intelligence.enrichCandidates(
+        candidates,
+        {
+          now: Date.now(),
+          routeMode:
+            state.routingMode
+        }
+      )
     : candidates;
 }
 
@@ -571,21 +558,20 @@ function renderDriverStatus(pick, result, trip) {
         ? "No decision needed"
         : "Watching ahead";
 
-    const discoverySummary =
-      Number(metrics.discoveredCount || 0) > 0
-        ? [
-            `${metrics.discoveredCount} discovered`,
-            Number(metrics.extendedCount || 0) > 0
-              ? `${metrics.extendedCount} extended`
-              : "",
-            Number(metrics.destinationDetourCount || 0) > 0
-              ? `${metrics.destinationDetourCount} destination`
-              : "",
-            `${metrics.curatedCount || 0} curated`
-          ].filter(Boolean).join(" · ")
-        : metrics.discoveryStatus === "unavailable"
-          ? "Restaurant discovery unavailable; curated stops only"
-          : `${metrics.curatedCount || 0} curated stops`;
+    const outcome =
+      getSearchOutcomeCopy(metrics);
+    const discoverySummary = [
+      outcome.label,
+      `${Number(metrics.rawDiscoveredCount || 0)} mapped`,
+      `${Number(metrics.matrixScreenedCount || 0)} screened`,
+      `${Number(metrics.totalCandidates || 0)} qualified`,
+      Number(metrics.exactRouteCount || 0) > 0
+        ? `${metrics.exactRouteCount} exact`
+        : "",
+      Number(metrics.estimatedRouteCount || 0) > 0
+        ? `${metrics.estimatedRouteCount} estimated`
+        : ""
+    ].filter(Boolean).join(" · ");
 
     const discoveryWithExceptional =
       metrics.exceptionalSearchUsed &&
@@ -597,52 +583,28 @@ function renderDriverStatus(pick, result, trip) {
       state.routingMessage ||
       `${discoveryWithExceptional} · updated ${formatRelativeUpdate(metrics.updatedAt)}`;
     els.routingProgressMessage.classList.remove("hidden");
-    els.demoToggleButton.classList.add("hidden");
-    els.debugPanel.classList.add("hidden");
     return;
   }
 
-  const candidates = getCandidates();
-  const maxSeq = Math.max(1, ...candidates.map(candidate => Number(candidate.seq ?? 0)));
-  const routePosition = Math.max(0, Math.min(maxSeq, Number(state.routePosition)));
-  const progress = Math.round((routePosition / maxSeq) * 100);
-  const remainingMinutes = Math.max(0, Math.round((maxSeq - routePosition) * 52));
-
-  const evaluated = (result?.evaluated || result?.upcoming || [])
-    .map(normalizePick)
-    .filter(Boolean)
-    .sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0));
-
-  const nextStrong = evaluated.find(candidate =>
-    candidate.open !== false &&
-    candidate.score >= 86 &&
-    Number(candidate.seq ?? 0) >= routePosition
+  els.routeProgressBar.style.width = "0%";
+  els.routeProgressText.textContent =
+    "Live route unavailable";
+  els.routeRemainingText.textContent =
+    "Return to trip setup and recheck the route.";
+  els.liveRouteBadge.textContent =
+    "Route needed";
+  els.liveRouteBadge.className =
+    "live-route-badge waiting";
+  els.nextFoodZoneText.textContent =
+    "No live restaurant corridor is active";
+  els.decisionCountdownText.textContent =
+    "No decision available";
+  els.routingProgressMessage.textContent =
+    "DetourEats will not substitute demo restaurants for a failed live route.";
+  els.routingProgressMessage.classList.remove(
+    "hidden"
   );
 
-  els.routeProgressBar.style.width = `${progress}%`;
-  els.routeProgressText.textContent = `${progress}% of demo corridor`;
-  els.routeRemainingText.textContent = remainingMinutes
-    ? `About ${formatDuration(remainingMinutes)} remaining`
-    : "Destination area";
-  els.liveRouteBadge.textContent = "Demo";
-  els.liveRouteBadge.className = "live-route-badge demo";
-  els.routingProgressMessage.classList.add("hidden");
-
-  if (nextStrong) {
-    const minutesAhead = estimateMinutesAhead(nextStrong);
-    els.nextFoodZoneText.textContent =
-      `${nextStrong.city || nextStrong.name} · about ${formatDuration(minutesAhead)} ahead`;
-  } else {
-    els.nextFoodZoneText.textContent = "No strong zone in the current lookahead";
-  }
-
-  els.decisionCountdownText.textContent = pick
-    ? getDecisionTiming(pick).label
-    : trip.key === "keep-driving"
-      ? "No decision needed"
-      : "Watching ahead";
-
-  els.demoToggleButton.classList.remove("hidden");
 }
 
 function estimateMinutesAhead(pick) {
@@ -1782,7 +1744,7 @@ const REMOVED_DEMO_TRIP_KEYS = new Set([
   "new york, ny|washington, dc",
   "syracuse, ny|philadelphia, pa"
 ]);
-const ROUTE_SETUP_TIMEOUT_MS = 36000;
+const ROUTE_SETUP_TIMEOUT_MS = 48000;
 
 function getRouteSignature() {
   const originKey = state.locationIsOrigin && state.currentCoordinates
@@ -1914,17 +1876,95 @@ function clearRecentTrips() {
   renderRecentTrips();
 }
 
-function renderRoutePreview(message = "") {
+function getSearchOutcomeCopy(
+  metrics
+) {
+  const outcomes = {
+    restaurant_search_unavailable: {
+      label:
+        "Restaurant search unavailable",
+      detail:
+        "The driving route is valid, but the public restaurant service did not respond. This does not mean there are no restaurants.",
+      className:
+        "pipeline-unavailable"
+    },
+    no_restaurants_found: {
+      label:
+        "No mapped restaurants returned",
+      detail:
+        "Completed route sections returned no named restaurant records. Retrying later may produce updated map data.",
+      className:
+        "pipeline-empty"
+    },
+    restaurants_found_route_checks_failed: {
+      label:
+        "Restaurants found; timing unavailable",
+      detail:
+        "Mapped restaurants were found, but the routing service could not calculate usable detour times.",
+      className:
+        "pipeline-partial"
+    },
+    restaurants_found_but_none_qualified: {
+      label:
+        "Restaurants found; none qualified",
+      detail:
+        "Restaurant records were found and screened, but none met the active detour and route-fit limits.",
+      className:
+        "pipeline-empty"
+    },
+    partial_results_available: {
+      label:
+        "Partial results available",
+      detail:
+        "Some route sections timed out, but successful restaurant and routing results were retained.",
+      className:
+        "pipeline-partial"
+    },
+    restaurants_found_and_routed: {
+      label:
+        "Restaurant route checks complete",
+      detail:
+        "Route-relevant restaurants were screened and the strongest detours were confirmed.",
+      className:
+        "pipeline-ready"
+    },
+    no_qualifying_restaurants: {
+      label:
+        "No qualifying restaurant yet",
+      detail:
+        "The route is valid, but there is not currently a restaurant that clears the recommendation threshold.",
+      className:
+        "pipeline-empty"
+    }
+  };
+
+  return (
+    outcomes[
+      metrics?.searchOutcome
+    ] ||
+    outcomes.no_qualifying_restaurants
+  );
+}
+
+function renderRoutePreview(
+  message = ""
+) {
   if (!els.routePreviewCard) return;
 
-  if (state.routePreviewStatus === "loading") {
+  if (
+    state.routePreviewStatus ===
+    "loading"
+  ) {
     els.routePreviewCard.innerHTML = `
       <div class="route-preview-loading">
         <span class="route-preview-spinner" aria-hidden="true"></span>
         <div>
           <span>Checking route</span>
-          <strong>${escapeHtml(message || state.routingMessage || "Calculating drive time and food options")}</strong>
-          <small>Public route and restaurant services are being checked. The app will stop rather than spin indefinitely.</small>
+          <strong>${escapeHtml(message || state.routingMessage || "Calculating the driving route")}</strong>
+          <small>
+            Restaurant sections are searched independently, so successful partial
+            results are retained. The process has a hard time limit.
+          </small>
           <button id="cancelRouteCheckButton" class="text-button route-cancel-button" type="button">Cancel</button>
         </div>
       </div>
@@ -1932,7 +1972,10 @@ function renderRoutePreview(message = "") {
     return;
   }
 
-  if (state.routePreviewStatus === "error") {
+  if (
+    state.routePreviewStatus ===
+    "error"
+  ) {
     els.routePreviewCard.innerHTML = `
       <div class="route-preview-error">
         <span>Route not ready</span>
@@ -1943,7 +1986,8 @@ function renderRoutePreview(message = "") {
     return;
   }
 
-  const preview = state.routePreview;
+  const preview =
+    state.routePreview;
   if (!preview) {
     els.routePreviewCard.innerHTML = `
       <div class="route-preview-empty">
@@ -1955,30 +1999,113 @@ function renderRoutePreview(message = "") {
     return;
   }
 
-  const metrics = preview.snapshot?.metrics || {};
-  const discovered = Number(metrics.discoveredCount || 0);
-  const curated = Number(metrics.curatedCount || 0);
-  const total = Number(metrics.totalCandidates || discovered + curated);
+  const metrics =
+    preview.snapshot?.metrics || {};
+  const outcome =
+    getSearchOutcomeCopy(metrics);
+  const discovered =
+    Number(
+      metrics.discoveredCount || 0
+    );
+  const curated =
+    Number(
+      metrics.curatedCount || 0
+    );
+  const total =
+    Number(
+      metrics.totalCandidates || 0
+    );
+  const raw =
+    Number(
+      metrics.rawDiscoveredCount || 0
+    );
+  const screened =
+    Number(
+      metrics.matrixScreenedCount || 0
+    );
+  const exact =
+    Number(
+      metrics.exactRouteCount || 0
+    );
+  const estimated =
+    Number(
+      metrics.estimatedRouteCount || 0
+    );
+  const chunkCompleted =
+    Number(
+      metrics.discoveryChunksCompleted ||
+      0
+    );
+  const chunkTotal =
+    Number(
+      metrics.discoveryChunksTotal ||
+      0
+    );
+  const chunkFailed =
+    Number(
+      metrics.discoveryChunksFailed ||
+      0
+    );
 
   els.routePreviewCard.innerHTML = `
     <div class="route-preview-ready">
       <div class="route-preview-heading">
-        <span>Route ready</span>
+        <span>Driving route ready</span>
         <strong>${escapeHtml(state.origin)} → ${escapeHtml(state.destination)}</strong>
       </div>
+
       <div class="route-preview-grid">
-        <div><span>Drive time</span><strong>${escapeHtml(formatDuration(metrics.totalMinutes || metrics.remainingMinutes || 0))}</strong></div>
-        <div><span>Distance</span><strong>${escapeHtml(String(Math.round(Number(metrics.totalMiles || metrics.remainingMiles || 0))))} mi</strong></div>
-        <div><span>Food options</span><strong>${total}</strong></div>
+        <div>
+          <span>Drive time</span>
+          <strong>${escapeHtml(formatDuration(metrics.totalMinutes || metrics.remainingMinutes || 0))}</strong>
+        </div>
+        <div>
+          <span>Distance</span>
+          <strong>${escapeHtml(String(Math.round(Number(metrics.totalMiles || metrics.remainingMiles || 0))))} mi</strong>
+        </div>
+        <div>
+          <span>Qualified options</span>
+          <strong>${total}</strong>
+        </div>
       </div>
-      <p>${discovered} route-discovered · ${curated} curated</p>
+
+      <section class="route-pipeline-status ${escapeHtml(outcome.className)}">
+        <strong>${escapeHtml(outcome.label)}</strong>
+        <p>${escapeHtml(outcome.detail)}</p>
+      </section>
+
+      <div class="pipeline-count-grid">
+        <div>
+          <span>Mapped records</span>
+          <strong>${raw}</strong>
+        </div>
+        <div>
+          <span>Route screened</span>
+          <strong>${screened}</strong>
+        </div>
+        <div>
+          <span>Exact timing</span>
+          <strong>${exact}</strong>
+        </div>
+        <div>
+          <span>Matrix estimates</span>
+          <strong>${estimated}</strong>
+        </div>
+      </div>
+
+      <p>
+        ${discovered} route-discovered · ${curated} curated ·
+        ${chunkCompleted}/${chunkTotal || chunkCompleted} search sections completed
+        ${chunkFailed ? ` · ${chunkFailed} section${chunkFailed === 1 ? "" : "s"} unavailable` : ""}
+      </p>
+
       <div class="adaptive-search-summary">
-        <strong>${escapeHtml(metrics.searchMode || "Adaptive detour search")}</strong>
-        <span>${escapeHtml(metrics.searchSummary || `Searched up to approximately ${Number(metrics.searchRadiusMiles || 5).toFixed(0)} miles from the route.`)}</span>
+        <strong>${escapeHtml(metrics.searchMode || "Segmented route search")}</strong>
+        <span>${escapeHtml(metrics.searchSummary || "Restaurant discovery was checked in smaller route sections.")}</span>
         ${metrics.exceptionalSearchUsed &&
           els.exceptionalAlertsInput?.checked !== false ? `
           <small>
-            Rare-place override: strict scan on up to approximately
+            Rare-place override: strict scan attempted up to approximately
             ${Number(metrics.exceptionalRadiusMiles || 25).toFixed(0)} miles,
             regardless of Eating Priority.
           </small>
@@ -2114,8 +2241,21 @@ async function previewSelectedRoute({ quiet = false } = {}) {
     renderRoutePreview();
 
     if (!quiet) {
-      const count = Number(result.snapshot?.metrics?.totalCandidates || 0);
-      showToast("Route ready", `${count} qualifying food options were found.`);
+      const metrics =
+        result.snapshot?.metrics || {};
+      const count =
+        Number(
+          metrics.totalCandidates || 0
+        );
+      const outcome =
+        getSearchOutcomeCopy(metrics);
+
+      showToast(
+        "Driving route ready",
+        count > 0
+          ? `${count} route-relevant food option${count === 1 ? "" : "s"} qualified.`
+          : outcome.detail
+      );
     }
 
     return result;
@@ -2276,8 +2416,8 @@ async function startTrip() {
   state.currentTime = getActualCurrentMinutes();
   state.routePosition = 0;
   state.lookahead = 99;
-  state.candidatePool = els.candidatePoolInput?.value || "All";
-  state.hoursMode = els.hoursModeInput?.value || "requireOpen";
+  state.candidatePool = "All";
+  state.hoursMode = "requireOpen";
   state.skippedIds = new Set();
   state.announcedAlertKeys = new Set();
   state.announcedExceptionalKeys = new Set();
@@ -2304,12 +2444,20 @@ async function startTrip() {
   );
   render();
 
-  const count = Number(preview.snapshot?.metrics?.totalCandidates || 0);
+  const metrics =
+    preview.snapshot?.metrics || {};
+  const count =
+    Number(
+      metrics.totalCandidates || 0
+    );
+  const outcome =
+    getSearchOutcomeCopy(metrics);
+
   showToast(
     "Trip started",
     count > 0
-      ? `${count} route-relevant food options are being evaluated.`
-      : "The live route is active, but no route-verified restaurant has qualified yet. Unrelated demo restaurants will not be substituted."
+      ? `${count} route-relevant food option${count === 1 ? "" : "s"} are active.`
+      : outcome.detail
   );
 }
 
@@ -2649,22 +2797,45 @@ async function requestCurrentLocation() {
     els.useLocationButton.textContent = "Use My Location";
 
     const message = error?.code === 1
-      ? "Location permission was denied. The curated route will still work."
+      ? "Location permission was denied. You can type a starting point instead."
       : error?.code === 3
         ? "Location request timed out. Try again when signal is stronger."
         : "Your location could not be determined.";
 
-    updateLocationSetup("Demo route remains available", message, "error");
+    updateLocationSetup("Use a typed starting point", message, "error");
   } finally {
     els.useLocationButton.disabled = false;
   }
 }
 
-function updateLocationSetup(title, status, mode = "demo") {
-  els.locationSetupTitle.textContent = title;
-  els.locationSetupStatus.textContent = status;
-  els.locationModeBadge.textContent = mode === "live" ? "Location ready" : mode === "working" ? "Working" : "Demo route";
-  els.locationModeBadge.className = `location-mode-badge ${mode}`;
+function updateLocationSetup(
+  title,
+  status,
+  mode = "manual"
+) {
+  els.locationSetupTitle.textContent =
+    title;
+  els.locationSetupStatus.textContent =
+    status;
+
+  const labels = {
+    live: "Location ready",
+    working: "Working",
+    error: "Location unavailable",
+    manual: "Manual route",
+    demo: "Manual route"
+  };
+
+  const visualMode =
+    mode === "demo"
+      ? "manual"
+      : mode;
+
+  els.locationModeBadge.textContent =
+    labels[mode] ||
+    "Manual route";
+  els.locationModeBadge.className =
+    `location-mode-badge ${visualMode}`;
 }
 
 function startLocationWatch() {
@@ -2714,11 +2885,23 @@ async function handleLocationUpdate(position) {
 
   // Refresh only after about 2 miles or five minutes to protect public services.
   if (moved >= 3200 || elapsed >= 300000) {
-    await refreshLiveRoute(coordinates);
+    const forceRediscovery =
+      state.liveMetrics?.searchOutcome ===
+        "restaurant_search_unavailable" ||
+      Number(
+        state.liveMetrics?.candidatePoolCount ||
+        0
+      ) === 0 ||
+      elapsed >= 15 * 60 * 1000;
+
+    await refreshLiveRoute(
+      coordinates,
+      { forceRediscovery }
+    );
   }
 }
 
-async function refreshLiveRoute(coordinates) {
+async function refreshLiveRoute(coordinates, { forceRediscovery = false } = {}) {
   if (!state.liveSession || state.routingBusy) return;
 
   setRoutingBusy(true, "Updating route from your new position");
@@ -2728,7 +2911,8 @@ async function refreshLiveRoute(coordinates) {
       session: state.liveSession,
       originCoordinates: coordinates,
       maxAddedMinutes: state.maxAdded,
-      progressCallback: updateRoutingMessage
+      progressCallback: updateRoutingMessage,
+      forceRediscovery
     });
 
     applyLiveSnapshot(snapshot);
@@ -2761,7 +2945,10 @@ async function recheckRouteNow() {
       ? "Updating timing and restaurant order from your current position."
       : "Rechecking timing and restaurant order for the selected route."
   );
-  await refreshLiveRoute(routeOrigin);
+  await refreshLiveRoute(
+    routeOrigin,
+    { forceRediscovery: true }
+  );
 }
 
 async function enableNotifications() {
@@ -3336,22 +3523,20 @@ function maybePromptForStopFeedback() {
 
 
 function updateFromControls() {
-  state.routePosition = Number(els.routePositionInput?.value || 0);
-  state.lookahead = Number(els.lookaheadInput?.value || 5);
-  state.candidatePool = els.candidatePoolInput?.value || "All";
-  state.hoursMode = els.hoursModeInput?.value || "requireOpen";
-  state.currentTime = Number(els.currentTimeInput?.value || state.currentTime);
-  state.testerMode = Boolean(els.testerModeInput?.checked);
+  state.routePosition = 0;
+  state.lookahead = 99;
+  state.candidatePool = "All";
+  state.hoursMode = "requireOpen";
+  state.currentTime =
+    Number(
+      els.currentTimeInput?.value ||
+      state.currentTime
+    );
+  state.testerMode =
+    Boolean(
+      els.testerModeInput?.checked
+    );
   render();
-}
-
-function toggleDemoControls() {
-  if (state.routingMode === "live") {
-    showToast("Live route active", "Demo route controls are hidden while real location is active.");
-    return;
-  }
-  const hidden = els.debugPanel.classList.toggle("hidden");
-  els.demoToggleButton.textContent = hidden ? "Show Demo Controls" : "Hide Demo Controls";
 }
 
 function escapeHtml(value) {
@@ -3510,13 +3695,8 @@ els.recheckRouteButton.addEventListener("click", recheckRouteNow);
   button.addEventListener("click", () => setEatingPriority(button.dataset.priority));
 });
 els.enableNotificationsButton.addEventListener("click", enableNotifications);
-els.demoToggleButton.addEventListener("click", toggleDemoControls);
 
 [
-  els.routePositionInput,
-  els.lookaheadInput,
-  els.candidatePoolInput,
-  els.hoursModeInput,
   els.currentTimeInput,
   els.maxAddedInput,
   els.tripModeInput,

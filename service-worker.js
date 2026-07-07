@@ -1,4 +1,4 @@
-const CACHE_NAME = "detoureats-v1-8-1-hotfix";
+const CACHE_NAME = "detoureats-v1-8-2-route-repair";
 const ASSETS = [
   "./",
   "./index.html",

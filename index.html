@@ -31,7 +31,7 @@
 
         <section class="location-setup-card">
           <div>
-            <span id="locationModeBadge" class="location-mode-badge demo">Choose a route</span>
+            <span id="locationModeBadge" class="location-mode-badge manual">Choose a route</span>
             <strong id="locationSetupTitle">Start anywhere</strong>
             <small id="locationSetupStatus">Type a starting point or use your current location.</small>
           </div>
@@ -263,7 +263,7 @@
           <div>
             <div class="driver-kicker-row">
               <span class="driver-kicker">Driver Mode</span>
-              <span id="liveRouteBadge" class="live-route-badge demo">Demo</span>
+              <span id="liveRouteBadge" class="live-route-badge waiting">Route</span>
             </div>
             <strong id="routeProgressText">Starting route</strong>
           </div>
@@ -436,50 +436,6 @@
 
 
 
-      <button id="demoToggleButton" class="debug-toggle" type="button">Show Demo Controls</button>
-
-      <div id="debugPanel" class="debug-panel hidden">
-        <div class="panel">
-          <h2>Demo Controls</h2>
-          <p class="hint">These are for testing the prototype. They should stay hidden on the public experience.</p>
-
-          <label>
-            Route progress
-            <input id="routePositionInput" type="range" min="0" max="13" value="0">
-            <span id="routePositionLabel">Start of route</span>
-          </label>
-
-          <label>
-            Lookahead window
-            <select id="lookaheadInput">
-              <option value="3">Next 3 candidates</option>
-              <option value="5" selected>Next 5 candidates</option>
-              <option value="8">Next 8 candidates</option>
-              <option value="99">Whole remaining trip</option>
-            </select>
-          </label>
-
-          <label>
-            Candidate pool
-            <select id="candidatePoolInput">
-              <option value="All" selected>All candidates</option>
-              <option value="Core Candidate">Core food candidates</option>
-              <option value="Breakfast/Morning">Breakfast / morning only</option>
-              <option value="Arrival Candidate">Arrival area only</option>
-            </select>
-          </label>
-
-          <label>
-            Hours logic
-            <select id="hoursModeInput">
-              <option value="requireOpen" selected>Require open at arrival</option>
-              <option value="warnOnly">Warn only / debug</option>
-            </select>
-          </label>
-        </div>
-
-        <section id="upcomingPanel" class="panel"></section>
-      </div>
     </section>
   </main>
 

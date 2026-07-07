@@ -1,4 +1,4 @@
-/* DetourEats v1.8.1 Hotfix bounded live-route module
+/* DetourEats v1.8.2 Route Pipeline Repair
    No account or API token is required.
 
    Prototype services:
@@ -6,46 +6,60 @@
    - Project OSRM public routing server
    - Overpass API for restaurants along the route
 
-   Public services are queried conservatively and the app always retains
-   its curated demo fallback.
+   Public services are queried conservatively. A live trip never falls
+   back to unrelated demo restaurants when a service is slow or unavailable.
 */
 (function () {
   "use strict";
 
   const GEOCODE_CACHE_KEY = "detoureats_geocode_cache_v2";
-  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v1";
-  const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
-  const OSRM_URL = "https://router.project-osrm.org/route/v1/driving";
+  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v3";
+
+  const NOMINATIM_URL =
+    "https://nominatim.openstreetmap.org/search";
+  const OSRM_ROUTE_URL =
+    "https://router.project-osrm.org/route/v1/driving";
+  const OSRM_TABLE_URL =
+    "https://router.project-osrm.org/table/v1/driving";
   const OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter"
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
   ];
-  const GEOCODE_DELAY_MS = 1100;
+
   const GEOCODE_TIMEOUT_MS = 8000;
-  const BASELINE_ROUTE_TIMEOUT_MS = 9000;
-  const CANDIDATE_ROUTE_TIMEOUT_MS = 5500;
-  const PRACTICAL_DISCOVERY_BUDGET_MS = 8500;
-  const OPTIONAL_DISCOVERY_BUDGET_MS = 5500;
-  const CANDIDATE_ROUTING_BUDGET_MS = 13000;
-  const CANDIDATE_ROUTING_CONCURRENCY = 5;
+  const BASELINE_ROUTE_TIMEOUT_MS = 10000;
+  const TABLE_TIMEOUT_MS = 9000;
+  const EXACT_ROUTE_TIMEOUT_MS = 7000;
+
+  const DISCOVERY_TOTAL_BUDGET_MS = 18000;
+  const PRACTICAL_CHUNK_TIMEOUT_MS = 7000;
+  const OPTIONAL_CHUNK_TIMEOUT_MS = 6000;
+  const DISCOVERY_CONCURRENCY = 3;
+  const OPTIONAL_DISCOVERY_CONCURRENCY = 2;
+
+  const EXACT_ROUTING_BUDGET_MS = 13000;
+  const EXACT_ROUTING_CONCURRENCY = 3;
+
+  const PRACTICAL_RADIUS_METERS = 8000;
+  const EXTENDED_RADIUS_METERS = 24000;
+  const DESTINATION_RADIUS_METERS = 40000;
+  const EXCEPTIONAL_RADIUS_METERS = 40000;
+  const HUNGRY_FALLBACK_RADIUS_METERS = 12000;
+
+  const PRACTICAL_CHUNK_LENGTH_METERS = 52000;
+  const EXTENDED_CHUNK_LENGTH_METERS = 105000;
+  const DESTINATION_CHUNK_LENGTH_METERS = 155000;
+  const PRACTICAL_POINT_SPACING_METERS = 5500;
+  const OPTIONAL_POINT_SPACING_METERS = 11000;
+
+  const ROUTE_BUCKET_COUNT = 20;
+  const MAX_DISCOVERED_CANDIDATES = 36;
+  const MAX_TABLE_CANDIDATES = 20;
+  const MAX_EXACT_CANDIDATES = 10;
 
   const activeControllers = new Set();
   let activeBuildGeneration = 0;
-
-  // Adaptive discovery tiers. These are candidate-search distances from
-  // the route, not automatic recommendations.
-  const PRACTICAL_RADIUS_METERS = 8000;      // about 5 miles
-  const EXTENDED_RADIUS_METERS = 24000;      // about 15 miles
-  const DESTINATION_RADIUS_METERS = 40000;   // about 25 miles
-  const EXCEPTIONAL_RADIUS_METERS = 40000;   // always-on strict scan
-  const HUNGRY_FALLBACK_RADIUS_METERS = 12000;
-
-  const MAX_ROUTE_SAMPLES = 28;
-  const WIDE_ROUTE_SAMPLES = 16;
-  const EXCEPTIONAL_ROUTE_SAMPLES = 10;
-  const ROUTE_SAMPLE_SPACING_METERS = 35000;
-  const MAX_DISCOVERED_CANDIDATES = 32;
-  const MAX_ROUTED_CANDIDATES = 20;
 
   const KNOWN_CHAINS = [
     "mcdonald", "burger king", "wendy", "taco bell", "kfc",
@@ -213,7 +227,7 @@
     });
 
     const data = await fetchJson(
-      `${OSRM_URL}/${coordinateString}?${params.toString()}`,
+      `${OSRM_ROUTE_URL}/${coordinateString}?${params.toString()}`,
       {},
       Number(options.timeoutMs || BASELINE_ROUTE_TIMEOUT_MS)
     );
@@ -223,35 +237,109 @@
     return result;
   }
 
-  async function prepareCuratedCandidates(
-    candidates,
-    routeSamples,
-    progressCallback
-  ) {
-    const source = (candidates || []).filter(candidate => {
-      if (!Array.isArray(candidate.coordinates)) return false;
-      return (
-        distanceToSamples(candidate.coordinates, routeSamples) <=
-        35000
+  async function routeTable(coordinates, timeoutMs = TABLE_TIMEOUT_MS) {
+    if (!Array.isArray(coordinates) || coordinates.length < 3) {
+      throw new Error(
+        "The route matrix requires an origin, destination, and at least one restaurant."
       );
+    }
+
+    const coordinateString = coordinates
+      .map(pair =>
+        `${Number(pair[0]).toFixed(6)},${Number(pair[1]).toFixed(6)}`
+      )
+      .join(";");
+
+    const candidateCount = coordinates.length - 2;
+    const sourceIndexes = [
+      0,
+      ...Array.from(
+        { length: candidateCount },
+        (_, index) => index + 1
+      )
+    ];
+    const destinationIndexes = [
+      ...Array.from(
+        { length: candidateCount },
+        (_, index) => index + 1
+      ),
+      coordinates.length - 1
+    ];
+
+    const params = new URLSearchParams({
+      sources: sourceIndexes.join(";"),
+      destinations: destinationIndexes.join(";"),
+      annotations: "duration,distance"
     });
 
-    if (source.length) {
+    const data = await fetchJson(
+      `${OSRM_TABLE_URL}/${coordinateString}?${params.toString()}`,
+      {},
+      timeoutMs
+    );
+
+    if (
+      data?.code !== "Ok" ||
+      !Array.isArray(data.durations)
+    ) {
+      throw new Error(
+        "The route timing matrix was unavailable."
+      );
+    }
+
+    return data;
+  }
+
+  async function prepareCuratedCandidates(
+    candidates,
+    routeContext,
+    progressCallback
+  ) {
+    const prepared = [];
+
+    for (const candidate of candidates || []) {
+      if (!Array.isArray(candidate.coordinates)) continue;
+
+      const projection = projectPointToRoute(
+        candidate.coordinates,
+        routeContext
+      );
+
+      if (
+        !projection ||
+        projection.distanceMeters > DESTINATION_RADIUS_METERS
+      ) {
+        continue;
+      }
+
+      prepared.push({
+        ...candidate,
+        coordinates: candidate.coordinates.map(Number),
+        coordinatePrecision:
+          candidate.coordinatePrecision ||
+          "curated coordinates",
+        provenance: "curated",
+        discoverySource: null,
+        routeOffsetMiles:
+          metersToMiles(projection.distanceMeters),
+        routeProgress:
+          projection.progress,
+        routeBucket:
+          projection.bucket,
+        detourTier:
+          getDetourTier(projection.distanceMeters)
+      });
+    }
+
+    if (prepared.length) {
       progressCallback?.(
-        `Adding ${source.length} curated stop${
-          source.length === 1 ? "" : "s"
+        `Adding ${prepared.length} route-relevant curated stop${
+          prepared.length === 1 ? "" : "s"
         }`
       );
     }
 
-    return source.map(candidate => ({
-      ...candidate,
-      coordinates: candidate.coordinates.map(Number),
-      coordinatePrecision:
-        candidate.coordinatePrecision || "curated coordinates",
-      provenance: "curated",
-      discoverySource: null
-    }));
+    return prepared;
   }
 
   async function buildLiveTrip({
@@ -270,8 +358,13 @@
     const buildGeneration = activeBuildGeneration;
     assertBuildActive(buildGeneration);
 
-    if (!Array.isArray(originCoordinates) && !String(originText || "").trim()) {
-      throw new Error("Enter a starting point or use your current location.");
+    if (
+      !Array.isArray(originCoordinates) &&
+      !String(originText || "").trim()
+    ) {
+      throw new Error(
+        "Enter a starting point or use your current location."
+      );
     }
     if (!String(destinationText || "").trim()) {
       throw new Error("Enter a destination.");
@@ -281,110 +374,176 @@
     const origin = Array.isArray(originCoordinates)
       ? {
           coordinates: originCoordinates.map(Number),
-          precision: originText ? "address autocomplete" : "device location",
-          label: originLabel || originText || "Current location"
+          precision: originText
+            ? "address autocomplete"
+            : "device location",
+          label:
+            originLabel ||
+            originText ||
+            "Current location"
         }
       : await geocode(originText);
 
     assertBuildActive(buildGeneration);
     progressCallback?.("Locating destination");
 
-    const destinationFallback = destinationText
-      .toLowerCase()
-      .includes("myrtle beach")
-        ? [-78.8867, 33.6891]
-        : null;
-
-    const destination = Array.isArray(destinationCoordinates)
+    const destination = Array.isArray(
+      destinationCoordinates
+    )
       ? {
-          coordinates: destinationCoordinates.map(Number),
+          coordinates:
+            destinationCoordinates.map(Number),
           precision: "address autocomplete",
-          label: destinationLabel || destinationText
+          label:
+            destinationLabel ||
+            destinationText
         }
-      : await geocode(destinationText, destinationFallback);
+      : await geocode(destinationText);
 
-    if (distanceMeters(origin.coordinates, destination.coordinates) < 1500) {
-      throw new Error("Starting point and destination are too close together.");
+    if (
+      distanceMeters(
+        origin.coordinates,
+        destination.coordinates
+      ) < 1500
+    ) {
+      throw new Error(
+        "Starting point and destination are too close together."
+      );
     }
 
     assertBuildActive(buildGeneration);
     progressCallback?.("Calculating main route");
+
     const baseline = await route(
-      [origin.coordinates, destination.coordinates],
+      [
+        origin.coordinates,
+        destination.coordinates
+      ],
       {
         steps: true,
         geometry: true,
         timeoutMs: BASELINE_ROUTE_TIMEOUT_MS
       }
     );
+
     assertBuildActive(buildGeneration);
 
-    const routeCoordinates =
+    const routeGeometry =
       baseline?.geometry?.coordinates ||
-      [origin.coordinates, destination.coordinates];
+      [
+        origin.coordinates,
+        destination.coordinates
+      ];
+    const routeContext =
+      buildRouteContext(routeGeometry);
 
-    const routeSamples = sampleRoute(routeCoordinates);
+    progressCallback?.(
+      "Searching route sections for restaurants"
+    );
 
-    progressCallback?.("Finding restaurants worth leaving the route for");
-    let discoveredCandidates = [];
-    let discoveryStatus = "available";
-    let discoveryPlan = createDefaultDiscoveryPlan(tripMode);
+    let discovery = {
+      candidates: [],
+      plan:
+        createDefaultDiscoveryPlan(tripMode),
+      diagnostics: {
+        status: "unavailable",
+        totalChunks: 0,
+        completedChunks: 0,
+        failedChunks: 0,
+        cachedChunks: 0,
+        rawElements: 0
+      }
+    };
 
     try {
-      const discovery = await discoverRestaurants(
-        routeSamples,
+      discovery = await discoverRestaurants(
+        routeContext,
         progressCallback,
         {
           tripMode,
-          routeDistanceMeters: Number(baseline.distance || 0),
+          routeDistanceMeters:
+            Number(baseline.distance || 0),
           buildGeneration
         }
       );
-      discoveredCandidates = discovery.candidates;
-      discoveryPlan = discovery.plan;
     } catch (error) {
-      console.warn("Restaurant discovery unavailable:", error);
-      discoveryStatus = "unavailable";
-      discoveryPlan.status = "unavailable";
+      if (/canceled/i.test(error?.message || "")) {
+        throw error;
+      }
+      console.warn(
+        "Restaurant discovery unavailable:",
+        error
+      );
+      discovery.plan.status = "unavailable";
+      discovery.plan.summary =
+        "The driving route is ready, but restaurant discovery did not respond.";
     }
 
     assertBuildActive(buildGeneration);
-    const relevantCurated = await prepareCuratedCandidates(
-      candidates,
-      routeSamples,
-      progressCallback
-    );
 
-    const mergedCandidates = selectCandidatesForRouting(
-      mergeCandidates(relevantCurated, discoveredCandidates),
-      routeSamples
-    );
+    const relevantCurated =
+      await prepareCuratedCandidates(
+        candidates,
+        routeContext,
+        progressCallback
+      );
+
+    const mergedCandidates =
+      selectCandidatesForRouting(
+        mergeCandidates(
+          relevantCurated,
+          discovery.candidates
+        )
+      );
 
     const session = {
       originText: String(originText || ""),
-      originLabel: origin.label || String(originText || "Current location"),
+      originLabel:
+        origin.label ||
+        String(
+          originText || "Current location"
+        ),
       originCoordinates: origin.coordinates,
       destinationText,
-      destinationLabel: destination.label || destinationText,
-      destinationCoordinates: destination.coordinates,
+      destinationLabel:
+        destination.label ||
+        destinationText,
+      destinationCoordinates:
+        destination.coordinates,
+      routeGeometry,
+      routeContext,
       candidates: mergedCandidates,
-      initialDurationSeconds: Number(baseline.duration || 0),
-      initialDistanceMeters: Number(baseline.distance || 0),
-      discoveryStatus,
-      discoveryPlan,
-      tripMode: String(tripMode || "balanced"),
-      discoveredCount: discoveredCandidates.length,
-      curatedCount: relevantCurated.length,
+      curatedSourceCandidates:
+        candidates || [],
+      initialDurationSeconds:
+        Number(baseline.duration || 0),
+      initialDistanceMeters:
+        Number(baseline.distance || 0),
+      discoveryStatus:
+        discovery.plan.status,
+      discoveryPlan:
+        discovery.plan,
+      discoveryDiagnostics:
+        discovery.diagnostics,
+      tripMode:
+        String(tripMode || "balanced"),
+      discoveredCount:
+        discovery.candidates.length,
+      curatedCount:
+        relevantCurated.length,
+      lastDiscoveryAt: Date.now(),
       createdAt: Date.now()
     };
 
     const snapshot = await refreshLiveTrip({
       session,
-      originCoordinates: origin.coordinates,
+      originCoordinates:
+        origin.coordinates,
       maxAddedMinutes,
       progressCallback,
       baselineRoute: baseline,
-      buildGeneration
+      buildGeneration,
+      forceRediscovery: false
     });
 
     return { session, snapshot };
@@ -396,188 +555,121 @@
     maxAddedMinutes,
     progressCallback,
     baselineRoute = null,
-    buildGeneration = activeBuildGeneration
+    buildGeneration = activeBuildGeneration,
+    forceRediscovery = false
   }) {
     assertBuildActive(buildGeneration);
-    progressCallback?.("Updating route");
+    progressCallback?.("Updating driving route");
 
-    const baseline = baselineRoute || await route(
-      [originCoordinates, session.destinationCoordinates],
-      {
-        steps: true,
-        geometry: false,
-        timeoutMs: BASELINE_ROUTE_TIMEOUT_MS
-      }
-    );
+    const shouldRediscover =
+      forceRediscovery ||
+      !Array.isArray(session.candidates) ||
+      session.candidates.length === 0 ||
+      session.discoveryStatus === "unavailable" ||
+      Date.now() -
+        Number(session.lastDiscoveryAt || 0) >
+        15 * 60 * 1000;
+
+    const baseline =
+      baselineRoute ||
+      await route(
+        [
+          originCoordinates,
+          session.destinationCoordinates
+        ],
+        {
+          steps: true,
+          geometry: shouldRediscover,
+          timeoutMs:
+            BASELINE_ROUTE_TIMEOUT_MS
+        }
+      );
 
     assertBuildActive(buildGeneration);
 
-    const maximumDetour = getMaximumCandidateDetour(
-      maxAddedMinutes,
-      session.tripMode
-    );
-    const backtrackAllowanceSeconds =
-      getBacktrackAllowanceSeconds(session.tripMode);
-    const liveCandidates = [];
-    const candidatesToRoute = (session.candidates || [])
-      .slice(0, MAX_ROUTED_CANDIDATES);
-    const routingDeadline =
-      Date.now() + CANDIDATE_ROUTING_BUDGET_MS;
-    let nextCandidateIndex = 0;
-    let startedChecks = 0;
+    if (shouldRediscover) {
+      const geometry =
+        baseline?.geometry?.coordinates ||
+        session.routeGeometry ||
+        [
+          originCoordinates,
+          session.destinationCoordinates
+        ];
+      const routeContext =
+        buildRouteContext(geometry);
 
-    async function routeCandidateWorker() {
-      while (true) {
-        assertBuildActive(buildGeneration);
+      progressCallback?.(
+        "Refreshing restaurant search on the remaining route"
+      );
 
-        const index = nextCandidateIndex;
-        nextCandidateIndex += 1;
-
-        if (index >= candidatesToRoute.length) return;
-        if (Date.now() >= routingDeadline) return;
-
-        const candidate = candidatesToRoute[index];
-        startedChecks += 1;
-        progressCallback?.(
-          `Checking food stops ${startedChecks} of ${
-            candidatesToRoute.length
-          }`
-        );
-
-        const remainingBudget =
-          routingDeadline - Date.now();
-        if (remainingBudget < 1000) return;
-
-        try {
-          const via = await route(
-            [
-              originCoordinates,
-              candidate.coordinates,
-              session.destinationCoordinates
-            ],
+      try {
+        const discovery =
+          await discoverRestaurants(
+            routeContext,
+            progressCallback,
             {
-              steps: true,
-              geometry: false,
-              timeoutMs: Math.min(
-                CANDIDATE_ROUTE_TIMEOUT_MS,
-                remainingBudget
-              )
+              tripMode: session.tripMode,
+              routeDistanceMeters:
+                Number(
+                  baseline.distance || 0
+                ),
+              buildGeneration
             }
           );
 
-          assertBuildActive(buildGeneration);
+        const curated =
+          await prepareCuratedCandidates(
+            session.curatedSourceCandidates ||
+              [],
+            routeContext,
+            progressCallback
+          );
 
-          const firstLeg = via.legs?.[0];
-          if (!firstLeg) continue;
-
-          const addedMinutes = Math.max(
-            0,
-            Math.round(
-              (
-                Number(via.duration || 0) -
-                Number(baseline.duration || 0)
-              ) / 60
+        session.routeGeometry = geometry;
+        session.routeContext = routeContext;
+        session.candidates =
+          selectCandidatesForRouting(
+            mergeCandidates(
+              curated,
+              discovery.candidates
             )
           );
-          const minutesAhead = Math.max(
-            0,
-            Math.ceil(
-              Number(firstLeg.duration || 0) / 60
-            )
-          );
-          const milesAhead = metersToMiles(
-            Number(firstLeg.distance || 0)
-          );
-
-          const candidateMaximumDetour =
-            candidate.exceptionalOnly
-              ? Math.max(maximumDetour, 45)
-              : maximumDetour;
-          const candidateBacktrackAllowanceSeconds =
-            candidate.exceptionalOnly
-              ? Math.max(
-                  backtrackAllowanceSeconds,
-                  4500
-                )
-              : backtrackAllowanceSeconds;
-
-          if (addedMinutes > candidateMaximumDetour) {
-            continue;
-          }
-          if (
-            Number(firstLeg.duration || 0) >
-            Number(baseline.duration || 0) +
-              candidateBacktrackAllowanceSeconds
-          ) {
-            continue;
-          }
-
-          const decision = findDecisionPoint(firstLeg);
-          const arrival = new Date(
-            Date.now() +
-              Number(firstLeg.duration || 0) * 1000
-          );
-
-          liveCandidates.push({
-            ...candidate,
-            liveRoute: true,
-            addedMinutes,
-            estimatedAddedMinutes: addedMinutes,
-            minutesAhead,
-            distanceAheadMiles: milesAhead,
-            arrivalClock: formatClock(arrival),
-            arrivalTime: formatClock(arrival),
-            arrivalTimestamp: arrival.getTime(),
-            decisionMinutes: Math.max(
-              0,
-              Math.ceil(
-                Number(decision.seconds || 0) / 60
-              )
-            ),
-            decisionInstruction: decision.instruction,
-            routeCalculatedAt: Date.now()
-          });
-        } catch (error) {
-          if (/canceled/i.test(error?.message || "")) {
-            throw error;
-          }
-          console.warn(
-            `Route check failed for ${candidate.name}`,
-            error
-          );
+        session.discoveryStatus =
+          discovery.plan.status;
+        session.discoveryPlan =
+          discovery.plan;
+        session.discoveryDiagnostics =
+          discovery.diagnostics;
+        session.discoveredCount =
+          discovery.candidates.length;
+        session.curatedCount =
+          curated.length;
+        session.lastDiscoveryAt =
+          Date.now();
+      } catch (error) {
+        if (/canceled/i.test(error?.message || "")) {
+          throw error;
         }
+        console.warn(
+          "Restaurant rediscovery delayed:",
+          error
+        );
       }
-    }
-
-    const workerCount = Math.min(
-      CANDIDATE_ROUTING_CONCURRENCY,
-      candidatesToRoute.length
-    );
-
-    if (workerCount > 0) {
-      await Promise.all(
-        Array.from(
-          { length: workerCount },
-          () => routeCandidateWorker()
-        )
-      );
     }
 
     assertBuildActive(buildGeneration);
 
-    liveCandidates.sort((a, b) => {
-      if (a.minutesAhead !== b.minutesAhead) {
-        return a.minutesAhead - b.minutesAhead;
-      }
-      return (
-        a.estimatedAddedMinutes -
-        b.estimatedAddedMinutes
-      );
-    });
+    const routing =
+      await screenAndRouteCandidates({
+        session,
+        originCoordinates,
+        baseline,
+        maxAddedMinutes,
+        progressCallback,
+        buildGeneration
+      });
 
-    liveCandidates.forEach((candidate, index) => {
-      candidate.seq = index + 1;
-    });
+    assertBuildActive(buildGeneration);
 
     const initialDuration = Math.max(
       1,
@@ -593,32 +685,63 @@
         baseline.distance
       )
     );
-    const remainingDuration = Number(
-      baseline.duration || 0
-    );
-    const remainingDistance = Number(
-      baseline.distance || 0
-    );
+    const remainingDuration =
+      Number(baseline.duration || 0);
+    const remainingDistance =
+      Number(baseline.distance || 0);
 
     const durationProgress = clamp(
-      1 - remainingDuration / initialDuration,
+      1 -
+        remainingDuration /
+          initialDuration,
       0,
       1
     );
     const distanceProgress = clamp(
-      1 - remainingDistance / initialDistance,
+      1 -
+        remainingDistance /
+          initialDistance,
       0,
       1
     );
 
-    const routedDiscovered = liveCandidates.filter(
-      candidate =>
-        candidate.provenance === "route-discovered"
-    ).length;
-    const routedCurated = liveCandidates.filter(
-      candidate =>
-        candidate.provenance !== "route-discovered"
-    ).length;
+    const liveCandidates =
+      routing.candidates;
+
+    const routedDiscovered =
+      liveCandidates.filter(
+        candidate =>
+          candidate.provenance ===
+          "route-discovered"
+      ).length;
+    const routedCurated =
+      liveCandidates.filter(
+        candidate =>
+          candidate.provenance !==
+          "route-discovered"
+      ).length;
+
+    const searchOutcome =
+      determineSearchOutcome({
+        discoveryStatus:
+          session.discoveryStatus,
+        discoveredRaw:
+          Number(
+            session.discoveryDiagnostics
+              ?.rawElements || 0
+          ),
+        candidatePool:
+          Number(
+            session.candidates?.length || 0
+          ),
+        matrixStatus:
+          routing.matrixStatus,
+        qualifyingCount:
+          liveCandidates.length
+      });
+
+    const plan =
+      session.discoveryPlan || {};
 
     return {
       candidates: liveCandidates,
@@ -626,514 +749,1510 @@
       destinationCoordinates:
         session.destinationCoordinates,
       metrics: {
-        originLabel: session.originLabel,
-        destinationLabel: session.destinationLabel,
+        originLabel:
+          session.originLabel,
+        destinationLabel:
+          session.destinationLabel,
         totalMinutes: Math.round(
-          Number(baseline.duration || 0) / 60
-        ),
-        totalMiles: metersToMiles(
-          Number(baseline.distance || 0)
-        ),
-        totalCandidates: liveCandidates.length,
-        progressPercent: Math.round(
-          Math.max(
-            durationProgress,
-            distanceProgress
-          ) * 100
-        ),
-        remainingMinutes: Math.round(
           remainingDuration / 60
         ),
-        remainingMiles: metersToMiles(
-          remainingDistance
-        ),
-        discoveredCount: routedDiscovered,
-        curatedCount: routedCurated,
-        discoveryStatus: session.discoveryStatus,
-        practicalCount: liveCandidates.filter(
-          candidate =>
-            candidate.detourTier === "practical"
-        ).length,
-        extendedCount: liveCandidates.filter(
-          candidate =>
-            candidate.detourTier === "extended"
-        ).length,
+        totalMiles:
+          metersToMiles(
+            remainingDistance
+          ),
+        totalCandidates:
+          liveCandidates.length,
+        progressPercent:
+          Math.round(
+            Math.max(
+              durationProgress,
+              distanceProgress
+            ) * 100
+          ),
+        remainingMinutes:
+          Math.round(
+            remainingDuration / 60
+          ),
+        remainingMiles:
+          metersToMiles(
+            remainingDistance
+          ),
+
+        discoveredCount:
+          routedDiscovered,
+        curatedCount:
+          routedCurated,
+        rawDiscoveredCount:
+          Number(
+            session.discoveryDiagnostics
+              ?.rawElements || 0
+          ),
+        candidatePoolCount:
+          Number(
+            session.candidates?.length || 0
+          ),
+        matrixScreenedCount:
+          routing.matrixScreenedCount,
+        exactRouteCount:
+          routing.exactRouteCount,
+        estimatedRouteCount:
+          routing.estimatedRouteCount,
+
+        discoveryStatus:
+          session.discoveryStatus,
+        matrixStatus:
+          routing.matrixStatus,
+        exactRoutingStatus:
+          routing.exactRoutingStatus,
+        searchOutcome,
+
+        discoveryChunksTotal:
+          Number(
+            session.discoveryDiagnostics
+              ?.totalChunks || 0
+          ),
+        discoveryChunksCompleted:
+          Number(
+            session.discoveryDiagnostics
+              ?.completedChunks || 0
+          ),
+        discoveryChunksFailed:
+          Number(
+            session.discoveryDiagnostics
+              ?.failedChunks || 0
+          ),
+        discoveryChunksCached:
+          Number(
+            session.discoveryDiagnostics
+              ?.cachedChunks || 0
+          ),
+
+        practicalCount:
+          liveCandidates.filter(
+            candidate =>
+              candidate.detourTier ===
+              "practical"
+          ).length,
+        extendedCount:
+          liveCandidates.filter(
+            candidate =>
+              candidate.detourTier ===
+              "extended"
+          ).length,
         destinationDetourCount:
           liveCandidates.filter(
             candidate =>
-              candidate.detourTier === "destination"
+              candidate.detourTier ===
+              "destination"
           ).length,
-        searchRadiusMiles: Number(
-          session.discoveryPlan?.maximumRadiusMiles ||
-          metersToMiles(PRACTICAL_RADIUS_METERS)
-        ),
+
+        searchRadiusMiles:
+          Number(
+            plan.maximumRadiusMiles ||
+            metersToMiles(
+              PRACTICAL_RADIUS_METERS
+            )
+          ),
         searchMode:
-          session.discoveryPlan?.label ||
-          "Adaptive detour search",
+          plan.label ||
+          "Segmented route search",
         searchSummary:
-          session.discoveryPlan?.summary ||
-          "Practical route corridor with wider evidence-based discovery",
-        extendedSearchUsed: Boolean(
-          session.discoveryPlan?.extendedUsed
-        ),
-        destinationSearchUsed: Boolean(
-          session.discoveryPlan?.destinationUsed
-        ),
-        exceptionalSearchUsed: Boolean(
-          session.discoveryPlan
-            ?.exceptionalSearchUsed
-        ),
-        exceptionalRadiusMiles: Number(
-          session.discoveryPlan
-            ?.exceptionalRadiusMiles ||
-          metersToMiles(
-            EXCEPTIONAL_RADIUS_METERS
-          )
-        ),
+          plan.summary ||
+          "Restaurant discovery was checked in smaller route sections.",
+        extendedSearchUsed:
+          Boolean(plan.extendedUsed),
+        destinationSearchUsed:
+          Boolean(
+            plan.destinationUsed
+          ),
+        exceptionalSearchUsed:
+          Boolean(
+            plan.exceptionalSearchUsed
+          ),
+        exceptionalRadiusMiles:
+          Number(
+            plan.exceptionalRadiusMiles ||
+            metersToMiles(
+              EXCEPTIONAL_RADIUS_METERS
+            )
+          ),
         exceptionalCandidateCount:
           liveCandidates.filter(
             candidate =>
               candidate.exceptionalScan ||
               candidate.exceptionalOnly
           ).length,
-        candidateRoutingTimedOut:
-          candidatesToRoute.length > 0 &&
-          Date.now() >= routingDeadline,
-        candidateChecksAttempted:
-          startedChecks,
+
         updatedAt: Date.now()
       }
     };
   }
 
+  async function screenAndRouteCandidates({
+    session,
+    originCoordinates,
+    baseline,
+    maxAddedMinutes,
+    progressCallback,
+    buildGeneration
+  }) {
+    const sourceCandidates =
+      selectCandidatesForRouting(
+        session.candidates || []
+      ).slice(0, MAX_TABLE_CANDIDATES);
+
+    if (!sourceCandidates.length) {
+      return {
+        candidates: [],
+        matrixStatus: "not-needed",
+        exactRoutingStatus: "not-needed",
+        matrixScreenedCount: 0,
+        exactRouteCount: 0,
+        estimatedRouteCount: 0
+      };
+    }
+
+    progressCallback?.(
+      `Screening ${sourceCandidates.length} restaurants for real driving time`
+    );
+
+    let matrixCandidates = [];
+    let matrixStatus = "unavailable";
+
+    try {
+      const coordinates = [
+        originCoordinates,
+        ...sourceCandidates.map(
+          candidate =>
+            candidate.coordinates
+        ),
+        session.destinationCoordinates
+      ];
+      const tableResult =
+        await routeTable(
+          coordinates,
+          TABLE_TIMEOUT_MS
+        );
+
+      matrixCandidates =
+        applyRouteMatrix({
+          candidates:
+            sourceCandidates,
+          tableResult,
+          baseline,
+          maxAddedMinutes,
+          tripMode:
+            session.tripMode
+        });
+      matrixStatus =
+        matrixCandidates.length
+          ? "complete"
+          : "complete-no-qualifiers";
+    } catch (error) {
+      if (/canceled/i.test(error?.message || "")) {
+        throw error;
+      }
+
+      console.warn(
+        "Route matrix unavailable; using a smaller exact-route fallback:",
+        error
+      );
+      matrixStatus = "unavailable";
+      matrixCandidates =
+        sourceCandidates
+          .sort(
+            (a, b) =>
+              preliminaryCandidateRank(b) -
+              preliminaryCandidateRank(a)
+          )
+          .slice(0, 8)
+          .map(candidate => ({
+            ...candidate,
+            matrixAddedMinutes: null,
+            routeCalculationMethod:
+              "pending-exact",
+            routeTimingConfidence:
+              "pending"
+          }));
+    }
+
+    if (!matrixCandidates.length) {
+      return {
+        candidates: [],
+        matrixStatus,
+        exactRoutingStatus:
+          "not-needed",
+        matrixScreenedCount: 0,
+        exactRouteCount: 0,
+        estimatedRouteCount: 0
+      };
+    }
+
+    const exactTargets =
+      selectExactRouteTargets(
+        matrixCandidates
+      );
+
+    const exactResults =
+      await refineExactRoutes({
+        candidates: exactTargets,
+        originCoordinates,
+        destinationCoordinates:
+          session.destinationCoordinates,
+        baseline,
+        buildGeneration,
+        progressCallback
+      });
+
+    const exactById = new Map(
+      exactResults.map(candidate => [
+        String(candidate.id),
+        candidate
+      ])
+    );
+
+    const finalCandidates = [];
+
+    for (const candidate of matrixCandidates) {
+      const exact = exactById.get(
+        String(candidate.id)
+      );
+
+      if (exact) {
+        finalCandidates.push(exact);
+        continue;
+      }
+
+      if (
+        Number.isFinite(
+          Number(
+            candidate.matrixAddedMinutes
+          )
+        )
+      ) {
+        const minutesAhead =
+          Math.max(
+            0,
+            Number(
+              candidate.matrixMinutesAhead ||
+              0
+            )
+          );
+        const arrival = new Date(
+          Date.now() +
+            minutesAhead * 60 * 1000
+        );
+
+        finalCandidates.push({
+          ...candidate,
+          liveRoute: true,
+          addedMinutes:
+            Number(
+              candidate.matrixAddedMinutes
+            ),
+          estimatedAddedMinutes:
+            Number(
+              candidate.matrixAddedMinutes
+            ),
+          minutesAhead,
+          distanceAheadMiles:
+            Number(
+              candidate.matrixDistanceAheadMiles ||
+              0
+            ),
+          arrivalClock:
+            formatClock(arrival),
+          arrivalTime:
+            formatClock(arrival),
+          arrivalTimestamp:
+            arrival.getTime(),
+          decisionMinutes:
+            Math.max(
+              0,
+              Math.ceil(
+                minutesAhead - 10
+              )
+            ),
+          decisionInstruction:
+            "Prepare to leave the main route for this stop.",
+          routeCalculatedAt:
+            Date.now(),
+          routeCalculationMethod:
+            "matrix",
+          routeTimingConfidence:
+            "estimated"
+        });
+      }
+    }
+
+    finalCandidates.sort((a, b) => {
+      if (
+        Number(a.minutesAhead || 0) !==
+        Number(b.minutesAhead || 0)
+      ) {
+        return (
+          Number(a.minutesAhead || 0) -
+          Number(b.minutesAhead || 0)
+        );
+      }
+      return (
+        Number(
+          a.estimatedAddedMinutes || 0
+        ) -
+        Number(
+          b.estimatedAddedMinutes || 0
+        )
+      );
+    });
+
+    finalCandidates.forEach(
+      (candidate, index) => {
+        candidate.seq = index + 1;
+      }
+    );
+
+    const exactRouteCount =
+      finalCandidates.filter(
+        candidate =>
+          candidate.routeCalculationMethod ===
+          "exact"
+      ).length;
+    const estimatedRouteCount =
+      finalCandidates.filter(
+        candidate =>
+          candidate.routeCalculationMethod ===
+          "matrix"
+      ).length;
+
+    let exactRoutingStatus = "unavailable";
+    if (!exactTargets.length) {
+      exactRoutingStatus = "not-needed";
+    } else if (
+      exactRouteCount ===
+      exactTargets.length
+    ) {
+      exactRoutingStatus = "complete";
+    } else if (exactRouteCount > 0) {
+      exactRoutingStatus = "partial";
+    } else if (
+      estimatedRouteCount > 0
+    ) {
+      exactRoutingStatus =
+        "matrix-fallback";
+    }
+
+    return {
+      candidates: finalCandidates,
+      matrixStatus,
+      exactRoutingStatus,
+      matrixScreenedCount:
+        matrixCandidates.length,
+      exactRouteCount,
+      estimatedRouteCount
+    };
+  }
+
+  function applyRouteMatrix({
+    candidates,
+    tableResult,
+    baseline,
+    maxAddedMinutes,
+    tripMode
+  }) {
+    const durations =
+      tableResult.durations || [];
+    const distances =
+      tableResult.distances || [];
+    const candidateCount =
+      candidates.length;
+    const maximumDetour =
+      getMaximumCandidateDetour(
+        maxAddedMinutes,
+        tripMode
+      );
+    const results = [];
+
+    for (
+      let candidateIndex = 0;
+      candidateIndex < candidateCount;
+      candidateIndex += 1
+    ) {
+      const sourceRow =
+        candidateIndex + 1;
+      const candidateColumn =
+        candidateIndex;
+      const destinationColumn =
+        candidateCount;
+
+      const originToCandidate =
+        Number(
+          durations?.[0]?.[
+            candidateColumn
+          ]
+        );
+      const candidateToDestination =
+        Number(
+          durations?.[sourceRow]?.[
+            destinationColumn
+          ]
+        );
+      const originDistance =
+        Number(
+          distances?.[0]?.[
+            candidateColumn
+          ]
+        );
+
+      if (
+        !Number.isFinite(
+          originToCandidate
+        ) ||
+        !Number.isFinite(
+          candidateToDestination
+        )
+      ) {
+        continue;
+      }
+
+      const addedMinutes =
+        Math.max(
+          0,
+          Math.round(
+            (
+              originToCandidate +
+              candidateToDestination -
+              Number(
+                baseline.duration || 0
+              )
+            ) / 60
+          )
+        );
+
+      const candidate =
+        candidates[candidateIndex];
+      const allowed =
+        candidate.exceptionalOnly
+          ? Math.max(
+              maximumDetour,
+              45
+            )
+          : maximumDetour;
+
+      if (addedMinutes > allowed) {
+        continue;
+      }
+
+      const minutesAhead =
+        Math.max(
+          0,
+          Math.ceil(
+            originToCandidate / 60
+          )
+        );
+
+      if (
+        minutesAhead >
+        Math.ceil(
+          Number(
+            baseline.duration || 0
+          ) / 60
+        ) + 45
+      ) {
+        continue;
+      }
+
+      results.push({
+        ...candidate,
+        matrixAddedMinutes:
+          addedMinutes,
+        matrixMinutesAhead:
+          minutesAhead,
+        matrixDistanceAheadMiles:
+          Number.isFinite(
+            originDistance
+          )
+            ? metersToMiles(
+                originDistance
+              )
+            : 0,
+        routeCalculationMethod:
+          "matrix-screened",
+        routeTimingConfidence:
+          "estimated",
+        matrixRank:
+          preliminaryCandidateRank(
+            candidate,
+            addedMinutes
+          )
+      });
+    }
+
+    return results
+      .sort(
+        (a, b) =>
+          Number(b.matrixRank || 0) -
+          Number(a.matrixRank || 0)
+      )
+      .slice(0, MAX_TABLE_CANDIDATES);
+  }
+
+  function preliminaryCandidateRank(
+    candidate,
+    addedMinutes = null
+  ) {
+    const added =
+      Number.isFinite(
+        Number(addedMinutes)
+      )
+        ? Number(addedMinutes)
+        : 12;
+
+    return (
+      Number(
+        candidate.destinationWorthiness ||
+        0
+      ) * 1.25 +
+      Number(
+        candidate.foodReputation || 0
+      ) +
+      Number(
+        candidate.uniqueness || 0
+      ) * 0.5 +
+      Number(
+        candidate.destinationEvidenceScore ||
+        0
+      ) * 4 -
+      added * 1.8 -
+      Number(
+        candidate.routeOffsetMiles || 0
+      ) * 0.5 +
+      (
+        candidate.provenance ===
+        "curated"
+          ? 18
+          : 0
+      ) +
+      (
+        candidate.exceptionalScan
+          ? 12
+          : 0
+      )
+    );
+  }
+
+  function selectExactRouteTargets(
+    candidates
+  ) {
+    const selected = [];
+    const selectedIds = new Set();
+
+    function add(candidate) {
+      if (
+        !candidate ||
+        selectedIds.has(
+          String(candidate.id)
+        ) ||
+        selected.length >=
+          MAX_EXACT_CANDIDATES
+      ) {
+        return;
+      }
+      selectedIds.add(
+        String(candidate.id)
+      );
+      selected.push(candidate);
+    }
+
+    candidates
+      .slice()
+      .sort(
+        (a, b) =>
+          Number(b.matrixRank || 0) -
+          Number(a.matrixRank || 0)
+      )
+      .slice(0, 6)
+      .forEach(add);
+
+    for (
+      let bucketGroup = 0;
+      bucketGroup < 4;
+      bucketGroup += 1
+    ) {
+      const minimum =
+        bucketGroup * 5;
+      const maximum =
+        minimum + 4;
+      const candidate =
+        candidates
+          .filter(item =>
+            Number(item.routeBucket) >=
+              minimum &&
+            Number(item.routeBucket) <=
+              maximum
+          )
+          .sort(
+            (a, b) =>
+              Number(b.matrixRank || 0) -
+              Number(a.matrixRank || 0)
+          )[0];
+      add(candidate);
+    }
+
+    candidates
+      .filter(
+        candidate =>
+          candidate.exceptionalScan ||
+          candidate.exceptionalOnly
+      )
+      .slice(0, 2)
+      .forEach(add);
+
+    return selected;
+  }
+
+  async function refineExactRoutes({
+    candidates,
+    originCoordinates,
+    destinationCoordinates,
+    baseline,
+    buildGeneration,
+    progressCallback
+  }) {
+    if (!candidates.length) return [];
+
+    const deadline =
+      Date.now() +
+      EXACT_ROUTING_BUDGET_MS;
+    let cursor = 0;
+    let attempted = 0;
+    const results = [];
+
+    async function worker() {
+      while (true) {
+        assertBuildActive(
+          buildGeneration
+        );
+
+        const index = cursor;
+        cursor += 1;
+        if (index >= candidates.length) {
+          return;
+        }
+
+        const remaining =
+          deadline - Date.now();
+        if (remaining < 1000) return;
+
+        const candidate =
+          candidates[index];
+        attempted += 1;
+        progressCallback?.(
+          `Confirming best detours ${attempted} of ${candidates.length}`
+        );
+
+        try {
+          const via = await route(
+            [
+              originCoordinates,
+              candidate.coordinates,
+              destinationCoordinates
+            ],
+            {
+              steps: true,
+              geometry: false,
+              timeoutMs:
+                Math.min(
+                  EXACT_ROUTE_TIMEOUT_MS,
+                  remaining
+                )
+            }
+          );
+
+          const firstLeg =
+            via.legs?.[0];
+          if (!firstLeg) continue;
+
+          const addedMinutes =
+            Math.max(
+              0,
+              Math.round(
+                (
+                  Number(
+                    via.duration || 0
+                  ) -
+                  Number(
+                    baseline.duration ||
+                    0
+                  )
+                ) / 60
+              )
+            );
+          const minutesAhead =
+            Math.max(
+              0,
+              Math.ceil(
+                Number(
+                  firstLeg.duration ||
+                  0
+                ) / 60
+              )
+            );
+          const decision =
+            findDecisionPoint(firstLeg);
+          const arrival = new Date(
+            Date.now() +
+              Number(
+                firstLeg.duration || 0
+              ) * 1000
+          );
+
+          results.push({
+            ...candidate,
+            liveRoute: true,
+            addedMinutes,
+            estimatedAddedMinutes:
+              addedMinutes,
+            minutesAhead,
+            distanceAheadMiles:
+              metersToMiles(
+                Number(
+                  firstLeg.distance || 0
+                )
+              ),
+            arrivalClock:
+              formatClock(arrival),
+            arrivalTime:
+              formatClock(arrival),
+            arrivalTimestamp:
+              arrival.getTime(),
+            decisionMinutes:
+              Math.max(
+                0,
+                Math.ceil(
+                  Number(
+                    decision.seconds || 0
+                  ) / 60
+                )
+              ),
+            decisionInstruction:
+              decision.instruction,
+            routeCalculatedAt:
+              Date.now(),
+            routeCalculationMethod:
+              "exact",
+            routeTimingConfidence:
+              "high"
+          });
+        } catch (error) {
+          if (
+            /canceled/i.test(
+              error?.message || ""
+            )
+          ) {
+            throw error;
+          }
+          console.warn(
+            `Exact route confirmation failed for ${candidate.name}; retaining matrix estimate when available.`,
+            error
+          );
+        }
+      }
+    }
+
+    const workerCount =
+      Math.min(
+        EXACT_ROUTING_CONCURRENCY,
+        candidates.length
+      );
+
+    await Promise.all(
+      Array.from(
+        { length: workerCount },
+        () => worker()
+      )
+    );
+
+    return results;
+  }
+
   async function discoverRestaurants(
-    routeSamples,
+    routeContext,
     progressCallback,
     options = {}
   ) {
-    const style = normalizeTripMode(
-      options.tripMode
-    );
-    const routeMiles = metersToMiles(
-      options.routeDistanceMeters || 0
-    );
+    const style =
+      normalizeTripMode(
+        options.tripMode
+      );
     const buildGeneration =
       options.buildGeneration ??
       activeBuildGeneration;
+    const deadline =
+      Date.now() +
+      DISCOVERY_TOTAL_BUDGET_MS;
 
     assertBuildActive(buildGeneration);
 
-    let practical = [];
-    let practicalAvailable = true;
+    const practicalChunks =
+      buildRouteChunks(
+        routeContext,
+        PRACTICAL_CHUNK_LENGTH_METERS,
+        PRACTICAL_POINT_SPACING_METERS
+      );
+    const extendedChunks =
+      buildRouteChunks(
+        routeContext,
+        EXTENDED_CHUNK_LENGTH_METERS,
+        OPTIONAL_POINT_SPACING_METERS
+      );
+    const destinationChunks =
+      buildRouteChunks(
+        routeContext,
+        DESTINATION_CHUNK_LENGTH_METERS,
+        OPTIONAL_POINT_SPACING_METERS
+      );
 
-    try {
-      practical = await fetchDiscoveryTier({
-        routeSamples,
+    const practicalPromise =
+      discoverTierByChunks({
+        routeContext,
+        chunks: practicalChunks,
         radiusMeters:
           PRACTICAL_RADIUS_METERS,
         evidenceMode: "all",
         searchTier: "practical",
-        progressMessage:
-          "Searching the practical route corridor",
         progressCallback,
+        buildGeneration,
+        deadline,
         timeoutMs:
-          PRACTICAL_DISCOVERY_BUDGET_MS
+          PRACTICAL_CHUNK_TIMEOUT_MS,
+        concurrency:
+          DISCOVERY_CONCURRENCY
       });
-    } catch (error) {
-      practicalAvailable = false;
-      console.warn(
-        "Practical restaurant discovery timed out:",
-        error
-      );
-    }
 
-    assertBuildActive(buildGeneration);
-
-    let extended = [];
-    let destination = [];
-    let exceptional = [];
-
-    const hungry = style === "hungry";
-    const adventure = style === "adventure";
-    const practicalSparse =
-      practical.length < 8;
-    const extendedUsed =
-      adventure ||
+    const runExtended =
       style === "balanced" ||
-      practicalSparse;
+      style === "adventure";
 
-    const provisionalDestinationUsed =
-      !hungry &&
-      (
-        adventure ||
-        practical.length < 10 ||
-        (
-          style === "balanced" &&
-          routeMiles >= 180 &&
-          practical.length < 14
-        )
-      );
-
-    const optionalTasks = [];
-
-    if (extendedUsed) {
-      const extendedRadius = hungry
-        ? HUNGRY_FALLBACK_RADIUS_METERS
-        : EXTENDED_RADIUS_METERS;
-
-      optionalTasks.push(
-        fetchDiscoveryTier({
-          routeSamples: reduceRouteSamples(
-            routeSamples,
-            WIDE_ROUTE_SAMPLES
-          ),
-          radiusMeters: extendedRadius,
-          evidenceMode: "evidence",
-          searchTier: "extended",
-          progressMessage: hungry
-            ? "Checking slightly beyond a sparse food stretch"
-            : "Looking farther for places with a stronger food case",
-          progressCallback,
-          timeoutMs:
-            OPTIONAL_DISCOVERY_BUDGET_MS
-        })
-          .then(items => ({
-            type: "extended",
-            items
-          }))
-          .catch(error => {
-            console.warn(
-              "Extended discovery skipped:",
-              error
-            );
-            return {
-              type: "extended",
-              items: []
-            };
+    const extendedPromise =
+      runExtended
+        ? discoverTierByChunks({
+            routeContext,
+            chunks:
+              extendedChunks,
+            radiusMeters:
+              EXTENDED_RADIUS_METERS,
+            evidenceMode:
+              "evidence",
+            searchTier:
+              "extended",
+            progressCallback,
+            buildGeneration,
+            deadline,
+            timeoutMs:
+              OPTIONAL_CHUNK_TIMEOUT_MS,
+            concurrency:
+              OPTIONAL_DISCOVERY_CONCURRENCY
           })
-      );
-    }
+        : Promise.resolve(
+            emptyTierDiagnostics(
+              "extended"
+            )
+          );
 
-    if (provisionalDestinationUsed) {
-      optionalTasks.push(
-        fetchDiscoveryTier({
-          routeSamples: reduceRouteSamples(
-            routeSamples,
-            12
-          ),
-          radiusMeters:
-            DESTINATION_RADIUS_METERS,
-          evidenceMode: "destination",
-          searchTier: "destination",
-          progressMessage:
-            "Checking for rare destination-worthy detours",
-          progressCallback,
-          timeoutMs:
-            OPTIONAL_DISCOVERY_BUDGET_MS
-        })
-          .then(items => ({
-            type: "destination",
-            items
-          }))
-          .catch(error => {
-            console.warn(
-              "Destination discovery skipped:",
-              error
-            );
-            return {
-              type: "destination",
-              items: []
-            };
+    const destinationPromise =
+      style === "adventure"
+        ? discoverTierByChunks({
+            routeContext,
+            chunks:
+              destinationChunks,
+            radiusMeters:
+              DESTINATION_RADIUS_METERS,
+            evidenceMode:
+              "destination",
+            searchTier:
+              "destination",
+            progressCallback,
+            buildGeneration,
+            deadline,
+            timeoutMs:
+              OPTIONAL_CHUNK_TIMEOUT_MS,
+            concurrency:
+              OPTIONAL_DISCOVERY_CONCURRENCY
           })
-      );
-    } else {
-      optionalTasks.push(
-        fetchDiscoveryTier({
-          routeSamples: reduceRouteSamples(
-            routeSamples,
-            EXCEPTIONAL_ROUTE_SAMPLES
-          ),
-          radiusMeters:
-            EXCEPTIONAL_RADIUS_METERS,
-          evidenceMode: "exceptional",
-          searchTier: "exceptional",
-          progressMessage:
-            "Quietly checking for rare bucket-list opportunities",
-          progressCallback,
-          timeoutMs:
-            OPTIONAL_DISCOVERY_BUDGET_MS
-        })
-          .then(items => ({
-            type: "exceptional",
-            items
-          }))
-          .catch(error => {
-            console.warn(
-              "Exceptional discovery skipped:",
-              error
-            );
-            return {
-              type: "exceptional",
-              items: []
-            };
-          })
-      );
-    }
+        : discoverTierByChunks({
+            routeContext,
+            chunks:
+              destinationChunks,
+            radiusMeters:
+              EXCEPTIONAL_RADIUS_METERS,
+            evidenceMode:
+              "exceptional",
+            searchTier:
+              "exceptional",
+            progressCallback,
+            buildGeneration,
+            deadline,
+            timeoutMs:
+              OPTIONAL_CHUNK_TIMEOUT_MS,
+            concurrency:
+              OPTIONAL_DISCOVERY_CONCURRENCY
+          });
 
-    const optionalResults = await Promise.all(
-      optionalTasks
-    );
+    let [
+      practical,
+      extended,
+      destinationOrExceptional
+    ] = await Promise.all([
+      practicalPromise,
+      extendedPromise,
+      destinationPromise
+    ]);
+
     assertBuildActive(buildGeneration);
 
-    for (const result of optionalResults) {
-      if (result.type === "extended") {
-        extended = result.items;
-      } else if (
-        result.type === "destination"
-      ) {
-        destination = result.items;
-      } else if (
-        result.type === "exceptional"
-      ) {
-        exceptional = result.items;
-      }
+    if (
+      style === "hungry" &&
+      practical.items.length < 8 &&
+      Date.now() < deadline - 1500
+    ) {
+      extended =
+        await discoverTierByChunks({
+          routeContext,
+          chunks:
+            extendedChunks,
+          radiusMeters:
+            HUNGRY_FALLBACK_RADIUS_METERS,
+          evidenceMode:
+            "evidence",
+          searchTier:
+            "extended",
+          progressCallback,
+          buildGeneration,
+          deadline,
+          timeoutMs:
+            OPTIONAL_CHUNK_TIMEOUT_MS,
+          concurrency:
+            OPTIONAL_DISCOVERY_CONCURRENCY
+        });
     }
 
-    const combinedBeforeDestination =
+    const destination =
+      style === "adventure"
+        ? destinationOrExceptional
+        : emptyTierDiagnostics(
+            "destination"
+          );
+    const exceptional =
+      style === "adventure"
+        ? {
+            ...emptyTierDiagnostics(
+              "exceptional"
+            ),
+            items:
+              destination.items
+                .filter(
+                  isStrictExceptionalDiscoveryCandidate
+                )
+                .map(candidate => ({
+                  ...candidate,
+                  exceptionalScan:
+                    true,
+                  exceptionalOnly:
+                    false
+                }))
+          }
+        : destinationOrExceptional;
+
+    const combined =
       dedupeCandidates([
-        ...practical,
-        ...extended
+        ...practical.items,
+        ...extended.items,
+        ...destination.items,
+        ...exceptional.items
       ]);
-
-    const destinationUsed =
-      provisionalDestinationUsed &&
-      destination.length > 0;
-
-    if (destinationUsed) {
-      exceptional = destination
-        .filter(
-          isStrictExceptionalDiscoveryCandidate
-        )
-        .map(candidate => ({
-          ...candidate,
-          exceptionalScan: true,
-          exceptionalOnly: false
-        }));
-    }
 
     const candidates =
       selectDistributedDiscovered(
-        dedupeCandidates([
-          ...practical,
-          ...extended,
-          ...destination,
-          ...exceptional
-        ]),
-        routeSamples
+        combined
       );
 
-    const maximumRadiusMeters =
-      destinationUsed
+    const allDiagnostics = [
+      practical,
+      extended,
+      destinationOrExceptional
+    ];
+    const totalChunks =
+      allDiagnostics.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.diagnostics.totalChunks ||
+            0
+          ),
+        0
+      );
+    const completedChunks =
+      allDiagnostics.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.diagnostics.completedChunks ||
+            0
+          ),
+        0
+      );
+    const failedChunks =
+      allDiagnostics.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.diagnostics.failedChunks ||
+            0
+          ),
+        0
+      );
+    const cachedChunks =
+      allDiagnostics.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.diagnostics.cachedChunks ||
+            0
+          ),
+        0
+      );
+    const rawElements =
+      allDiagnostics.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.diagnostics.rawElements ||
+            0
+          ),
+        0
+      );
+
+    let status = "complete";
+    if (
+      completedChunks === 0 &&
+      cachedChunks === 0
+    ) {
+      status = "unavailable";
+    } else if (failedChunks > 0) {
+      status = "partial";
+    } else if (
+      rawElements === 0
+    ) {
+      status = "empty";
+    }
+
+    const maximumRadius =
+      style === "adventure"
         ? DESTINATION_RADIUS_METERS
-        : extendedUsed
-          ? hungry
+        : runExtended ||
+          extended.items.length
+          ? style === "hungry"
             ? HUNGRY_FALLBACK_RADIUS_METERS
             : EXTENDED_RADIUS_METERS
           : PRACTICAL_RADIUS_METERS;
 
-    return {
-      candidates,
-      plan: {
-        status:
-          practicalAvailable
-            ? "available"
-            : candidates.length
-              ? "partial"
-              : "unavailable",
-        style,
-        practicalUsed: true,
-        extendedUsed,
-        destinationUsed,
-        practicalRadiusMiles: metersToMiles(
+    const plan = {
+      status,
+      style,
+      practicalUsed: true,
+      extendedUsed:
+        runExtended ||
+        extended.items.length > 0,
+      destinationUsed:
+        style === "adventure",
+      exceptionalSearchUsed: true,
+      practicalRadiusMiles:
+        metersToMiles(
           PRACTICAL_RADIUS_METERS
         ),
-        extendedRadiusMiles: extendedUsed
+      extendedRadiusMiles:
+        runExtended ||
+        extended.items.length
           ? metersToMiles(
-              hungry
+              style === "hungry"
                 ? HUNGRY_FALLBACK_RADIUS_METERS
                 : EXTENDED_RADIUS_METERS
             )
           : 0,
-        destinationRadiusMiles:
-          destinationUsed
-            ? metersToMiles(
-                DESTINATION_RADIUS_METERS
-              )
-            : 0,
-        exceptionalSearchUsed: true,
-        exceptionalRadiusMiles: metersToMiles(
+      destinationRadiusMiles:
+        style === "adventure"
+          ? metersToMiles(
+              DESTINATION_RADIUS_METERS
+            )
+          : 0,
+      exceptionalRadiusMiles:
+        metersToMiles(
           EXCEPTIONAL_RADIUS_METERS
         ),
-        exceptionalFound:
-          exceptional.length,
-        maximumRadiusMiles:
-          metersToMiles(
-            maximumRadiusMeters
-          ),
-        label:
-          destinationUsed
-            ? "Adaptive search · destination detours included"
-            : extendedUsed
-              ? "Adaptive search · extended detours included"
-              : "Adaptive search · practical corridor",
-        summary: `${
-          buildDiscoveryPlanSummary({
-            style,
-            extendedUsed,
-            destinationUsed,
-            practicalSparse
-          })
-        } ${
-          practicalAvailable
-            ? ""
-            : "The primary public restaurant search was slow, so available fallback results were used. "
-        }A separate strict rare-place scan was attempted up to about 25 miles from the route.`,
-        practicalFound: practical.length,
-        extendedFound: extended.length,
-        destinationFound:
-          destination.length,
-        exceptionalFound:
-          exceptional.length
+      maximumRadiusMiles:
+        metersToMiles(
+          maximumRadius
+        ),
+      label:
+        status === "partial"
+          ? "Segmented route search · partial results retained"
+          : status === "unavailable"
+            ? "Driving route ready · restaurant search unavailable"
+            : style === "adventure"
+              ? "Segmented search · destination detours included"
+              : runExtended ||
+                extended.items.length
+                ? "Segmented search · extended detours included"
+                : "Segmented search · practical corridor",
+      summary:
+        buildSegmentedSearchSummary({
+          style,
+          status,
+          totalChunks,
+          completedChunks,
+          failedChunks,
+          rawElements,
+          practicalCount:
+            practical.items.length,
+          extendedCount:
+            extended.items.length,
+          destinationCount:
+            destination.items.length,
+          exceptionalCount:
+            exceptional.items.length
+        })
+    };
+
+    return {
+      candidates,
+      plan,
+      diagnostics: {
+        status,
+        totalChunks,
+        completedChunks,
+        failedChunks,
+        cachedChunks,
+        rawElements,
+        practicalElements:
+          practical.diagnostics.rawElements,
+        extendedElements:
+          extended.diagnostics.rawElements,
+        destinationElements:
+          destination.diagnostics.rawElements,
+        exceptionalElements:
+          exceptional.diagnostics.rawElements
       }
     };
   }
 
-  async function fetchDiscoveryTier({
-    routeSamples,
+  async function discoverTierByChunks({
+    routeContext,
+    chunks,
     radiusMeters,
     evidenceMode,
     searchTier,
-    progressMessage,
     progressCallback,
-    timeoutMs =
-      OPTIONAL_DISCOVERY_BUDGET_MS
+    buildGeneration,
+    deadline,
+    timeoutMs,
+    concurrency
   }) {
-    const routeKey = routeSamples
-      .map(point => `${point[1].toFixed(2)},${point[0].toFixed(2)}`)
-      .join("|");
+    if (!chunks.length) {
+      return emptyTierDiagnostics(
+        searchTier
+      );
+    }
+
+    const items = [];
+    let cursor = 0;
+    let completedChunks = 0;
+    let failedChunks = 0;
+    let cachedChunks = 0;
+    let rawElements = 0;
+
+    async function worker() {
+      while (true) {
+        assertBuildActive(
+          buildGeneration
+        );
+
+        const index = cursor;
+        cursor += 1;
+        if (index >= chunks.length) {
+          return;
+        }
+
+        const remaining =
+          deadline - Date.now();
+        if (remaining < 1000) {
+          failedChunks +=
+            chunks.length - index;
+          return;
+        }
+
+        const chunk =
+          chunks[index];
+        progressCallback?.(
+          `Searching route section ${index + 1} of ${chunks.length}`
+        );
+
+        try {
+          const result =
+            await fetchDiscoveryChunk({
+              chunk,
+              radiusMeters,
+              evidenceMode,
+              searchTier,
+              timeoutMs:
+                Math.min(
+                  timeoutMs,
+                  remaining
+                )
+            });
+
+          rawElements +=
+            result.elements.length;
+          completedChunks += 1;
+          if (result.cached) {
+            cachedChunks += 1;
+          }
+
+          for (
+            const element of
+            result.elements
+          ) {
+            const candidate =
+              convertOsmElement(
+                element,
+                routeContext,
+                searchTier
+              );
+            if (!candidate) continue;
+
+            if (
+              searchTier ===
+                "exceptional" &&
+              !isStrictExceptionalDiscoveryCandidate(
+                candidate
+              )
+            ) {
+              continue;
+            }
+            if (
+              searchTier ===
+                "destination" &&
+              candidate.destinationEvidenceLevel !==
+                "strong"
+            ) {
+              continue;
+            }
+            if (
+              searchTier ===
+                "extended" &&
+              candidate.destinationEvidenceLevel ===
+                "basic"
+            ) {
+              continue;
+            }
+
+            items.push(candidate);
+          }
+        } catch (error) {
+          if (
+            /canceled/i.test(
+              error?.message || ""
+            )
+          ) {
+            throw error;
+          }
+          failedChunks += 1;
+          console.warn(
+            `${searchTier} discovery failed for route section ${index + 1}:`,
+            error
+          );
+        }
+      }
+    }
+
+    const workerCount =
+      Math.min(
+        Math.max(1, concurrency),
+        chunks.length
+      );
+
+    await Promise.all(
+      Array.from(
+        { length: workerCount },
+        () => worker()
+      )
+    );
+
+    return {
+      items:
+        dedupeCandidates(items),
+      diagnostics: {
+        tier: searchTier,
+        totalChunks:
+          chunks.length,
+        completedChunks,
+        failedChunks,
+        cachedChunks,
+        rawElements
+      }
+    };
+  }
+
+  async function fetchDiscoveryChunk({
+    chunk,
+    radiusMeters,
+    evidenceMode,
+    searchTier,
+    timeoutMs
+  }) {
+    const cache =
+      loadJsonStorage(
+        DISCOVERY_CACHE_KEY
+      );
     const cacheKey =
-      `adaptive-v1|${searchTier}|${radiusMeters}|${evidenceMode}|${routeKey}`;
-    const cache = loadJsonStorage(DISCOVERY_CACHE_KEY);
-    const cached = cache[cacheKey];
+      buildDiscoveryChunkCacheKey({
+        chunk,
+        radiusMeters,
+        evidenceMode,
+        searchTier
+      });
+    const cached =
+      cache[cacheKey];
 
     if (
       cached &&
-      Array.isArray(cached.items) &&
-      Date.now() - Number(cached.savedAt || 0) < 6 * 60 * 60 * 1000
+      Array.isArray(cached.elements) &&
+      Date.now() -
+        Number(cached.savedAt || 0) <
+        6 * 60 * 60 * 1000
     ) {
-      return cached.items;
+      return {
+        elements:
+          cached.elements,
+        cached: true
+      };
     }
 
-    const query = buildOverpassQuery(
-      routeSamples,
-      radiusMeters,
-      evidenceMode
-    );
-    let data = null;
-    let lastError = null;
-
+    const query =
+      buildOverpassChunkQuery(
+        chunk.points,
+        radiusMeters,
+        evidenceMode
+      );
     const deadline =
       Date.now() +
-      Math.max(1500, Number(timeoutMs || 0));
+      Math.max(
+        1200,
+        Number(timeoutMs || 0)
+      );
+    let lastError = null;
 
-    for (const endpoint of OVERPASS_URLS) {
+    for (
+      let endpointIndex = 0;
+      endpointIndex <
+      OVERPASS_URLS.length;
+      endpointIndex += 1
+    ) {
       const remaining =
         deadline - Date.now();
-      if (remaining < 1000) break;
+      if (remaining < 900) break;
+
+      const endpoint =
+        OVERPASS_URLS[
+          (
+            chunk.index +
+            endpointIndex
+          ) %
+          OVERPASS_URLS.length
+        ];
 
       try {
-        progressCallback?.(progressMessage);
-        const body = new URLSearchParams({
-          data: query
-        }).toString();
+        const body =
+          new URLSearchParams({
+            data: query
+          }).toString();
 
-        data = await fetchJson(
-          endpoint,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type":
-                "application/x-www-form-urlencoded;charset=UTF-8"
+        const data =
+          await fetchJson(
+            endpoint,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/x-www-form-urlencoded;charset=UTF-8"
+              },
+              body
             },
-            body
-          },
-          remaining
+            remaining
+          );
+
+        const elements =
+          Array.isArray(
+            data?.elements
+          )
+            ? data.elements
+            : [];
+
+        cache[cacheKey] = {
+          savedAt:
+            Date.now(),
+          elements
+        };
+        saveJsonStorage(
+          DISCOVERY_CACHE_KEY,
+          trimDiscoveryCache(
+            cache
+          )
         );
-        break;
+
+        return {
+          elements,
+          cached: false
+        };
       } catch (error) {
         lastError = error;
-        console.warn(
-          `Overpass ${searchTier} discovery failed:`,
-          endpoint,
-          error
-        );
       }
     }
 
-    if (!data) {
-      if (searchTier === "practical") {
-        throw lastError || new Error("Restaurant discovery failed.");
-      }
-      return [];
-    }
-
-    const converted = (data.elements || [])
-      .map(element =>
-        convertOsmElement(element, routeSamples, searchTier)
+    throw (
+      lastError ||
+      new Error(
+        "Restaurant section search failed."
       )
-      .filter(Boolean)
-      .filter(candidate => {
-        if (searchTier === "exceptional") {
-          return isStrictExceptionalDiscoveryCandidate(candidate);
-        }
-        if (searchTier === "destination") {
-          return candidate.destinationEvidenceLevel === "strong";
-        }
-        if (searchTier === "extended") {
-          return candidate.destinationEvidenceLevel !== "basic";
-        }
-        return true;
-      });
-
-    cache[cacheKey] = {
-      savedAt: Date.now(),
-      items: converted
-    };
-    saveJsonStorage(DISCOVERY_CACHE_KEY, trimDiscoveryCache(cache));
-
-    return converted;
+    );
   }
 
-  function buildOverpassQuery(samples, radiusMeters, evidenceMode) {
-    const path = samples
+  function buildOverpassChunkQuery(
+    points,
+    radiusMeters,
+    evidenceMode
+  ) {
+    const path = points
       .map(point =>
-        `${Number(point[1]).toFixed(6)},${Number(point[0]).toFixed(6)}`
+        `${Number(point[1]).toFixed(5)},${Number(point[0]).toFixed(5)}`
       )
       .join(",");
 
     const selector =
-      `nwr(around:${radiusMeters},${path})` +
-      `["amenity"~"^(restaurant|fast_food|cafe)$"]["name"]`;
+      `nwr(around:${Math.round(radiusMeters)},${path})` +
+      `["amenity"~"^(restaurant|fast_food|cafe)$"]` +
+      `["name"]`;
 
     if (evidenceMode === "all") {
-      return `[out:json][timeout:45];
+      return `[out:json][timeout:25];
 ${selector};
-out center tags meta;`;
+out center tags;`;
     }
 
     const evidenceTags =
-      evidenceMode === "destination" ||
-      evidenceMode === "exceptional"
+      evidenceMode ===
+        "destination" ||
+      evidenceMode ===
+        "exceptional"
         ? [
             "wikidata",
             "wikipedia",
@@ -1141,102 +2260,245 @@ out center tags meta;`;
             "stars"
           ]
         : [
-          "wikidata",
-          "wikipedia",
-          "website",
-          "contact:website",
-          "description",
-          "award",
-          "stars"
-        ];
+            "wikidata",
+            "wikipedia",
+            "website",
+            "contact:website",
+            "description",
+            "award",
+            "stars"
+          ];
 
-    const clauses = evidenceTags.map(tag => `${selector}["${tag}"];`);
+    const clauses =
+      evidenceTags.map(
+        tag =>
+          `${selector}["${tag}"];`
+      );
 
     if (
-      evidenceMode === "destination" ||
-      evidenceMode === "exceptional"
+      evidenceMode ===
+        "destination" ||
+      evidenceMode ===
+        "exceptional"
     ) {
-      clauses.push(`${selector}["website"]["description"];`);
+      clauses.push(
+        `${selector}["website"]["description"];`
+      );
       clauses.push(
         `${selector}["contact:website"]["description"];`
       );
     }
 
-    return `[out:json][timeout:50];
+    return `[out:json][timeout:25];
 (
 ${clauses.join("\n")}
 );
-out center tags meta;`;
+out center tags;`;
   }
 
-  function createDefaultDiscoveryPlan(tripMode) {
-    const style = normalizeTripMode(tripMode);
+  function buildDiscoveryChunkCacheKey({
+    chunk,
+    radiusMeters,
+    evidenceMode,
+    searchTier
+  }) {
+    const start =
+      chunk.points[0];
+    const end =
+      chunk.points[
+        chunk.points.length - 1
+      ];
+
+    return [
+      "chunk-v3",
+      searchTier,
+      evidenceMode,
+      Math.round(radiusMeters),
+      Number(start[0]).toFixed(2),
+      Number(start[1]).toFixed(2),
+      Number(end[0]).toFixed(2),
+      Number(end[1]).toFixed(2)
+    ].join("|");
+  }
+
+  function emptyTierDiagnostics(tier) {
     return {
-      status: "pending",
-      style,
-      practicalUsed: true,
-      extendedUsed: false,
-      destinationUsed: false,
-      practicalRadiusMiles: metersToMiles(PRACTICAL_RADIUS_METERS),
-      extendedRadiusMiles: 0,
-      destinationRadiusMiles: 0,
-      exceptionalSearchUsed: true,
-      exceptionalRadiusMiles: metersToMiles(
-        EXCEPTIONAL_RADIUS_METERS
-      ),
-      exceptionalFound: 0,
-      maximumRadiusMiles: metersToMiles(PRACTICAL_RADIUS_METERS),
-      label: "Adaptive search · practical corridor",
-      summary:
-        "Searching the practical corridor first while a strict rare-place scan stays active."
+      items: [],
+      diagnostics: {
+        tier,
+        totalChunks: 0,
+        completedChunks: 0,
+        failedChunks: 0,
+        cachedChunks: 0,
+        rawElements: 0
+      }
     };
   }
 
-  function buildDiscoveryPlanSummary({
+  function createDefaultDiscoveryPlan(
+    tripMode
+  ) {
+    return {
+      status: "pending",
+      style:
+        normalizeTripMode(
+          tripMode
+        ),
+      practicalUsed: true,
+      extendedUsed: false,
+      destinationUsed: false,
+      exceptionalSearchUsed: true,
+      practicalRadiusMiles:
+        metersToMiles(
+          PRACTICAL_RADIUS_METERS
+        ),
+      extendedRadiusMiles: 0,
+      destinationRadiusMiles: 0,
+      exceptionalRadiusMiles:
+        metersToMiles(
+          EXCEPTIONAL_RADIUS_METERS
+        ),
+      maximumRadiusMiles:
+        metersToMiles(
+          PRACTICAL_RADIUS_METERS
+        ),
+      label:
+        "Segmented route search",
+      summary:
+        "Restaurant search is being run in smaller route sections."
+    };
+  }
+
+  function buildSegmentedSearchSummary({
     style,
-    extendedUsed,
-    destinationUsed,
-    practicalSparse
+    status,
+    totalChunks,
+    completedChunks,
+    failedChunks,
+    rawElements,
+    practicalCount,
+    extendedCount,
+    destinationCount,
+    exceptionalCount
   }) {
-    if (destinationUsed) {
-      return style === "adventure"
-        ? "Worth waiting for searched the practical corridor, promising places up to about 15 miles away, and rare destination candidates up to about 25 miles away."
-        : "The route was sparse, so DetourEats widened the search to include rare destination candidates up to about 25 miles away.";
+    if (status === "unavailable") {
+      return (
+        "The driving route is ready, but no restaurant-search section responded. " +
+        "This is a service failure, not a conclusion that the route has no restaurants."
+      );
     }
 
-    if (extendedUsed) {
-      return practicalSparse
-        ? "The normal route corridor was sparse, so DetourEats widened the search automatically."
-        : "Best overall included promising restaurants up to about 15 miles from the route.";
+    if (status === "empty") {
+      return (
+        `${completedChunks} route section${
+          completedChunks === 1
+            ? ""
+            : "s"
+        } completed, but OpenStreetMap returned no named restaurant, café, or fast-food records.`
+      );
     }
 
-    return "Eat soon found enough practical options close to the route.";
+    const resultText =
+      `${rawElements} raw mapped place record${
+        rawElements === 1
+          ? ""
+          : "s"
+      } returned across ${completedChunks} completed route section${
+        completedChunks === 1
+          ? ""
+          : "s"
+      }.`;
+
+    const tierText =
+      ` ${practicalCount} practical, ${extendedCount} extended, ${destinationCount} destination, and ${exceptionalCount} exceptional candidate record${
+        practicalCount +
+          extendedCount +
+          destinationCount +
+          exceptionalCount ===
+        1
+          ? ""
+          : "s"
+      } survived evidence filtering.`;
+
+    if (status === "partial") {
+      return (
+        `${resultText}${tierText} ${failedChunks} of ${totalChunks} section checks failed or timed out, so successful partial results were retained.`
+      );
+    }
+
+    return `${resultText}${tierText}`;
+  }
+
+  function determineSearchOutcome({
+    discoveryStatus,
+    discoveredRaw,
+    candidatePool,
+    matrixStatus,
+    qualifyingCount
+  }) {
+    if (
+      discoveryStatus ===
+        "unavailable" &&
+      candidatePool === 0
+    ) {
+      return "restaurant_search_unavailable";
+    }
+
+    if (
+      discoveryStatus === "empty" &&
+      discoveredRaw === 0 &&
+      candidatePool === 0
+    ) {
+      return "no_restaurants_found";
+    }
+
+    if (
+      candidatePool > 0 &&
+      matrixStatus ===
+        "unavailable" &&
+      qualifyingCount === 0
+    ) {
+      return "restaurants_found_route_checks_failed";
+    }
+
+    if (
+      candidatePool > 0 &&
+      qualifyingCount === 0
+    ) {
+      return "restaurants_found_but_none_qualified";
+    }
+
+    if (
+      discoveryStatus === "partial" &&
+      qualifyingCount > 0
+    ) {
+      return "partial_results_available";
+    }
+
+    if (qualifyingCount > 0) {
+      return "restaurants_found_and_routed";
+    }
+
+    return "no_qualifying_restaurants";
   }
 
   function normalizeTripMode(value) {
-    const mode = String(value || "balanced").toLowerCase();
+    const mode =
+      String(
+        value || "balanced"
+      ).toLowerCase();
+
     if (
       mode.includes("adventure") ||
       mode.includes("food") ||
       mode.includes("strict")
-    ) return "adventure";
-    if (mode.includes("hungry")) return "hungry";
+    ) {
+      return "adventure";
+    }
+    if (mode.includes("hungry")) {
+      return "hungry";
+    }
     return "balanced";
-  }
-
-  function reduceRouteSamples(samples, maximum) {
-    if (!Array.isArray(samples) || samples.length <= maximum) {
-      return samples || [];
-    }
-
-    const reduced = [];
-    for (let index = 0; index < maximum; index += 1) {
-      const sourceIndex = Math.round(
-        index * (samples.length - 1) / Math.max(1, maximum - 1)
-      );
-      reduced.push(samples[sourceIndex]);
-    }
-    return dedupeCoordinatePairs(reduced);
   }
 
   function trimDiscoveryCache(cache) {
@@ -1244,36 +2506,51 @@ out center tags meta;`;
       Object.entries(cache)
         .sort(
           (a, b) =>
-            Number(b[1]?.savedAt || 0) -
-            Number(a[1]?.savedAt || 0)
+            Number(
+              b[1]?.savedAt || 0
+            ) -
+            Number(
+              a[1]?.savedAt || 0
+            )
         )
-        .slice(0, 24)
+        .slice(0, 80)
     );
   }
 
-  function getMaximumCandidateDetour(maxAddedMinutes, tripMode) {
-    const maxAdded = Number(maxAddedMinutes || 10);
-    const style = normalizeTripMode(tripMode);
+  function getMaximumCandidateDetour(
+    maxAddedMinutes,
+    tripMode
+  ) {
+    const maxAdded =
+      Number(
+        maxAddedMinutes || 10
+      );
+    const style =
+      normalizeTripMode(
+        tripMode
+      );
 
     if (style === "hungry") {
-      return Math.max(maxAdded + 15, 25);
+      return Math.max(
+        maxAdded + 15,
+        25
+      );
     }
     if (style === "adventure") {
-      return Math.max(maxAdded + 55, 75);
+      return Math.max(
+        maxAdded + 55,
+        75
+      );
     }
-    return Math.max(maxAdded + 35, 50);
-  }
-
-  function getBacktrackAllowanceSeconds(tripMode) {
-    const style = normalizeTripMode(tripMode);
-    if (style === "hungry") return 1800;
-    if (style === "adventure") return 5400;
-    return 3600;
+    return Math.max(
+      maxAdded + 35,
+      50
+    );
   }
 
   function convertOsmElement(
     element,
-    routeSamples,
+    routeContext,
     searchTier = "practical"
   ) {
     const tags = element?.tags || {};
@@ -1319,17 +2596,21 @@ out center tags meta;`;
       tags["addr:hamlet"] ||
       "Along route";
 
-    const routeOffsetMeters = distanceToSamples(
-      coordinates,
-      routeSamples
-    );
-    const routeOffsetMiles = metersToMiles(routeOffsetMeters);
+    const routeProjection =
+      projectPointToRoute(
+        coordinates,
+        routeContext
+      );
+    if (!routeProjection) return null;
+
+    const routeOffsetMeters =
+      routeProjection.distanceMeters;
+    const routeOffsetMiles =
+      metersToMiles(routeOffsetMeters);
     const detourTier =
-      routeOffsetMeters <= PRACTICAL_RADIUS_METERS
-        ? "practical"
-        : routeOffsetMeters <= EXTENDED_RADIUS_METERS
-          ? "extended"
-          : "destination";
+      getDetourTier(
+        routeOffsetMeters
+      );
 
     const destinationEvidenceScore =
       (wikipedia ? 5 : 0) +
@@ -1409,7 +2690,8 @@ out center tags meta;`;
       destinationEvidenceLevel === "strong" ? 91 : 82
     );
 
-    const routeBucket = nearestSampleIndex(coordinates, routeSamples);
+    const routeBucket =
+      routeProjection.bucket;
     const regionalSpecialty =
       !chain &&
       Boolean(cuisine) &&
@@ -1509,6 +2791,12 @@ out center tags meta;`;
             ? "Route-discovered option. Hours and food quality are not independently verified."
             : `Wider-search candidate ${routeOffsetMiles.toFixed(1)} miles from the route. Actual detour time is calculated, but food quality and hours still require verification.`,
       routeBucket,
+      routeProgress:
+        routeProjection.progress,
+      routeAlongMiles:
+        metersToMiles(
+          routeProjection.alongMeters
+        ),
       routeOffsetMiles,
       detourTier,
       searchTier,
@@ -1575,8 +2863,7 @@ out center tags meta;`;
   }
 
   function selectDistributedDiscovered(
-    candidates,
-    routeSamples
+    candidates
   ) {
     const deduped = dedupeCandidates(candidates);
     const practical = deduped.filter(
@@ -1646,93 +2933,132 @@ out center tags meta;`;
     return [...selected, ...remaining].slice(0, maximum);
   }
 
-  function mergeCandidates(curated, discovered) {
-    const combined = [...curated, ...discovered];
-    const seen = new Map();
+  function mergeCandidates(
+    curated,
+    discovered
+  ) {
+    const combined =
+      dedupeCandidates([
+        ...(curated || []),
+        ...(discovered || [])
+      ]);
 
-    for (const candidate of combined) {
-      const key = normalizeName(candidate.name);
-      const existing = seen.get(key);
-
-      if (!existing) {
-        seen.set(key, candidate);
-        continue;
-      }
+    return combined.map(candidate => {
+      const duplicateCurated =
+        (curated || []).find(item =>
+          areCandidatesDuplicates(
+            item,
+            candidate
+          )
+        );
 
       if (
-        existing.provenance === "route-discovered" &&
-        candidate.provenance === "curated"
+        duplicateCurated &&
+        candidate.provenance ===
+          "route-discovered"
       ) {
-        seen.set(key, candidate);
+        return {
+          ...candidate,
+          ...duplicateCurated,
+          coordinates:
+            candidate.coordinates ||
+            duplicateCurated.coordinates,
+          duplicateMerged: true,
+          provenance: "curated"
+        };
       }
-    }
 
-    return [...seen.values()];
+      return candidate;
+    });
   }
 
   function selectCandidatesForRouting(
-    candidates,
-    routeSamples
+    candidates
   ) {
-    const normalized = candidates.map(candidate => ({
-      ...candidate,
-      routeBucket:
-        candidate.routeBucket ??
-        nearestSampleIndex(candidate.coordinates, routeSamples),
-      detourTier:
-        candidate.detourTier ||
-        (
-          candidate.provenance === "curated"
-            ? "practical"
-            : "practical"
-        )
-    }));
+    const normalized =
+      (candidates || []).map(
+        candidate => ({
+          ...candidate,
+          routeBucket:
+            Number.isFinite(
+              Number(
+                candidate.routeBucket
+              )
+            )
+              ? Number(
+                  candidate.routeBucket
+                )
+              : 0,
+          detourTier:
+            candidate.detourTier ||
+            "practical"
+        })
+      );
 
     const curated = normalized
-      .filter(candidate => candidate.provenance === "curated")
-      .sort((a, b) => a.routeBucket - b.routeBucket)
+      .filter(
+        candidate =>
+          candidate.provenance ===
+          "curated"
+      )
+      .sort(
+        (a, b) =>
+          preliminaryCandidateRank(b) -
+          preliminaryCandidateRank(a)
+      )
       .slice(0, 8);
 
-    const practical = selectTierDistributed(
-      normalized.filter(
-        candidate =>
-          candidate.provenance !== "curated" &&
-          candidate.detourTier === "practical"
-      ),
-      2,
-      12
-    );
+    const practical =
+      selectTierDistributed(
+        normalized.filter(
+          candidate =>
+            candidate.provenance !==
+              "curated" &&
+            candidate.detourTier ===
+              "practical"
+        ),
+        2,
+        14
+      );
 
-    const extended = selectTierDistributed(
-      normalized.filter(
-        candidate =>
-          candidate.provenance !== "curated" &&
-          candidate.detourTier === "extended"
-      ),
-      1,
-      6
-    );
+    const extended =
+      selectTierDistributed(
+        normalized.filter(
+          candidate =>
+            candidate.provenance !==
+              "curated" &&
+            candidate.detourTier ===
+              "extended"
+        ),
+        1,
+        7
+      );
 
-    const exceptional = selectTierDistributed(
-      normalized.filter(
-        candidate =>
-          candidate.provenance !== "curated" &&
-          candidate.exceptionalScan
-      ),
-      1,
-      4
-    );
+    const exceptional =
+      selectTierDistributed(
+        normalized.filter(
+          candidate =>
+            candidate.provenance !==
+              "curated" &&
+            candidate.exceptionalScan
+        ),
+        1,
+        4
+      );
 
-    const destination = selectTierDistributed(
-      normalized.filter(
-        candidate =>
-          candidate.provenance !== "curated" &&
-          candidate.detourTier === "destination" &&
-          !candidate.exceptionalScan
-      ),
-      1,
-      4
-    );
+    const destination =
+      selectTierDistributed(
+        normalized.filter(
+          candidate =>
+            candidate.provenance !==
+              "curated" &&
+            candidate.detourTier ===
+              "destination" &&
+            !candidate.exceptionalScan
+        ),
+        1,
+        5
+      );
 
     return dedupeCandidates([
       ...curated,
@@ -1741,74 +3067,117 @@ out center tags meta;`;
       ...exceptional,
       ...destination
     ])
-      .sort((a, b) => {
-        if (a.routeBucket !== b.routeBucket) {
-          return a.routeBucket - b.routeBucket;
-        }
-        if (a.provenance !== b.provenance) {
-          return a.provenance === "curated" ? -1 : 1;
-        }
-        return Number(b.discoveryRank || 0) -
-          Number(a.discoveryRank || 0);
-      })
-      .slice(0, MAX_ROUTED_CANDIDATES);
+      .sort(
+        (a, b) =>
+          preliminaryCandidateRank(b) -
+          preliminaryCandidateRank(a)
+      )
+      .slice(
+        0,
+        MAX_DISCOVERED_CANDIDATES
+      );
   }
 
-  function dedupeCandidates(candidates) {
+
+  function areCandidatesDuplicates(
+    existing,
+    candidate
+  ) {
+    if (!existing || !candidate) {
+      return false;
+    }
+
+    if (
+      candidate.osmType &&
+      candidate.osmId &&
+      existing.osmType ===
+        candidate.osmType &&
+      existing.osmId ===
+        candidate.osmId
+    ) {
+      return true;
+    }
+
+    const sameName =
+      normalizeName(
+        existing.name
+      ) ===
+      normalizeName(
+        candidate.name
+      );
+    if (!sameName) return false;
+
+    if (
+      existing.address &&
+      candidate.address &&
+      normalizeName(
+        existing.address
+      ) ===
+      normalizeName(
+        candidate.address
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      Array.isArray(
+        existing.coordinates
+      ) &&
+      Array.isArray(
+        candidate.coordinates
+      )
+    ) {
+      return (
+        distanceMeters(
+          existing.coordinates,
+          candidate.coordinates
+        ) <= 250
+      );
+    }
+
+    return false;
+  }
+
+  function dedupeCandidates(
+    candidates
+  ) {
     const result = [];
 
-    for (const candidate of candidates) {
-      const duplicate = result.find(existing => {
-        if (
-          candidate.osmType &&
-          candidate.osmId &&
-          existing.osmType === candidate.osmType &&
-          existing.osmId === candidate.osmId
-        ) {
-          return true;
-        }
-
-        const sameName =
-          normalizeName(existing.name) ===
-          normalizeName(candidate.name);
-        if (!sameName) return false;
-
-        if (
-          existing.address &&
-          candidate.address &&
-          normalizeName(existing.address) ===
-          normalizeName(candidate.address)
-        ) {
-          return true;
-        }
-
-        if (
-          Array.isArray(existing.coordinates) &&
-          Array.isArray(candidate.coordinates)
-        ) {
-          return distanceMeters(
-            existing.coordinates,
-            candidate.coordinates
-          ) <= 250;
-        }
-
-        return false;
-      });
+    for (
+      const candidate of
+      candidates || []
+    ) {
+      const duplicate =
+        result.find(existing =>
+          areCandidatesDuplicates(
+            existing,
+            candidate
+          )
+        );
 
       if (!duplicate) {
         result.push(candidate);
         continue;
       }
 
-      const duplicateIndex = result.indexOf(duplicate);
-      const existingEvidence = Number(
-        duplicate.destinationEvidenceScore || 0
-      );
-      const candidateEvidence = Number(
-        candidate.destinationEvidenceScore || 0
-      );
+      const duplicateIndex =
+        result.indexOf(
+          duplicate
+        );
+      const existingRank =
+        preliminaryCandidateRank(
+          duplicate
+        );
+      const candidateRank =
+        preliminaryCandidateRank(
+          candidate
+        );
 
-      if (candidateEvidence > existingEvidence) {
+      if (
+        candidateRank >
+        existingRank
+      ) {
         result[duplicateIndex] = {
           ...duplicate,
           ...candidate,
@@ -1826,64 +3195,464 @@ out center tags meta;`;
     return result;
   }
 
-  function sampleRoute(coordinates) {
-    if (!Array.isArray(coordinates) || coordinates.length < 2) {
-      return coordinates || [];
+  function buildRouteContext(
+    coordinates
+  ) {
+    const geometry =
+      (coordinates || [])
+        .filter(
+          point =>
+            Array.isArray(point) &&
+            point.length >= 2 &&
+            point.every(
+              value =>
+                Number.isFinite(
+                  Number(value)
+                )
+            )
+        )
+        .map(point => [
+          Number(point[0]),
+          Number(point[1])
+        ]);
+
+    if (geometry.length < 2) {
+      return {
+        geometry,
+        cumulativeMeters: [0],
+        totalMeters: 0
+      };
     }
 
-    const distances = [0];
-    let total = 0;
+    const cumulativeMeters = [0];
+    let totalMeters = 0;
 
-    for (let index = 1; index < coordinates.length; index += 1) {
-      total += distanceMeters(coordinates[index - 1], coordinates[index]);
-      distances.push(total);
+    for (
+      let index = 1;
+      index < geometry.length;
+      index += 1
+    ) {
+      totalMeters +=
+        distanceMeters(
+          geometry[index - 1],
+          geometry[index]
+        );
+      cumulativeMeters.push(
+        totalMeters
+      );
     }
 
-    const sampleCount = clamp(
-      Math.ceil(total / ROUTE_SAMPLE_SPACING_METERS) + 1,
-      6,
-      MAX_ROUTE_SAMPLES
-    );
-    const samples = [];
+    return {
+      geometry,
+      cumulativeMeters,
+      totalMeters
+    };
+  }
 
-    for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
-      const target =
-        total * (sampleIndex / Math.max(1, sampleCount - 1));
-      let coordinateIndex = 0;
+  function projectPointToRoute(
+    point,
+    routeContext
+  ) {
+    const geometry =
+      routeContext?.geometry || [];
+    const cumulative =
+      routeContext?.cumulativeMeters ||
+      [];
+    const total =
+      Number(
+        routeContext?.totalMeters || 0
+      );
+
+    if (
+      !Array.isArray(point) ||
+      geometry.length < 2
+    ) {
+      return null;
+    }
+
+    let best = null;
+
+    for (
+      let index = 0;
+      index <
+      geometry.length - 1;
+      index += 1
+    ) {
+      const projection =
+        projectPointToSegment(
+          point,
+          geometry[index],
+          geometry[index + 1]
+        );
+
+      if (
+        !best ||
+        projection.distanceMeters <
+          best.distanceMeters
+      ) {
+        const segmentMeters =
+          distanceMeters(
+            geometry[index],
+            geometry[index + 1]
+          );
+        const alongMeters =
+          Number(
+            cumulative[index] || 0
+          ) +
+          segmentMeters *
+            projection.t;
+
+        best = {
+          distanceMeters:
+            projection.distanceMeters,
+          alongMeters,
+          progress:
+            total > 0
+              ? clamp(
+                  alongMeters / total,
+                  0,
+                  1
+                )
+              : 0,
+          segmentIndex: index
+        };
+      }
+    }
+
+    if (!best) return null;
+
+    return {
+      ...best,
+      bucket: clamp(
+        Math.floor(
+          best.progress *
+            ROUTE_BUCKET_COUNT
+        ),
+        0,
+        ROUTE_BUCKET_COUNT - 1
+      )
+    };
+  }
+
+  function projectPointToSegment(
+    point,
+    start,
+    end
+  ) {
+    const radius = 6371000;
+    const referenceLat =
+      radians(
+        (
+          Number(point[1]) +
+          Number(start[1]) +
+          Number(end[1])
+        ) / 3
+      );
+    const cosLat =
+      Math.cos(referenceLat);
+
+    function planar(coordinate) {
+      return {
+        x:
+          radius *
+          radians(
+            Number(coordinate[0])
+          ) *
+          cosLat,
+        y:
+          radius *
+          radians(
+            Number(coordinate[1])
+          )
+      };
+    }
+
+    const p = planar(point);
+    const a = planar(start);
+    const b = planar(end);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const denominator =
+      dx * dx + dy * dy;
+
+    const t =
+      denominator > 0
+        ? clamp(
+            (
+              (p.x - a.x) * dx +
+              (p.y - a.y) * dy
+            ) /
+              denominator,
+            0,
+            1
+          )
+        : 0;
+
+    const nearestX =
+      a.x + dx * t;
+    const nearestY =
+      a.y + dy * t;
+
+    return {
+      t,
+      distanceMeters:
+        Math.hypot(
+          p.x - nearestX,
+          p.y - nearestY
+        )
+    };
+  }
+
+  function buildRouteChunks(
+    routeContext,
+    targetLengthMeters,
+    pointSpacingMeters
+  ) {
+    const sampled =
+      sampleRouteByDistance(
+        routeContext,
+        pointSpacingMeters
+      );
+
+    if (sampled.length < 2) {
+      return [];
+    }
+
+    const chunks = [];
+    let current = [sampled[0]];
+    let currentLength = 0;
+
+    for (
+      let index = 1;
+      index < sampled.length;
+      index += 1
+    ) {
+      const previous =
+        sampled[index - 1];
+      const point =
+        sampled[index];
+      const segment =
+        distanceMeters(
+          previous,
+          point
+        );
+
+      current.push(point);
+      currentLength += segment;
+
+      if (
+        currentLength >=
+          targetLengthMeters &&
+        current.length >= 3
+      ) {
+        chunks.push({
+          index:
+            chunks.length,
+          points:
+            reduceChunkPoints(
+              current,
+              18
+            )
+        });
+        current = [point];
+        currentLength = 0;
+      }
+    }
+
+    if (current.length === 1) {
+      const lastChunk =
+        chunks[
+          chunks.length - 1
+        ];
+      if (lastChunk) {
+        lastChunk.points.push(
+          current[0]
+        );
+        lastChunk.points =
+          reduceChunkPoints(
+            lastChunk.points,
+            18
+          );
+      }
+    } else if (
+      current.length >= 2
+    ) {
+      chunks.push({
+        index:
+          chunks.length,
+        points:
+          reduceChunkPoints(
+            current,
+            18
+          )
+      });
+    }
+
+    return chunks;
+  }
+
+  function sampleRouteByDistance(
+    routeContext,
+    spacingMeters
+  ) {
+    const geometry =
+      routeContext?.geometry || [];
+    const cumulative =
+      routeContext?.cumulativeMeters ||
+      [];
+    const total =
+      Number(
+        routeContext?.totalMeters || 0
+      );
+
+    if (geometry.length < 2) {
+      return geometry;
+    }
+
+    const result = [
+      geometry[0]
+    ];
+    let target =
+      Math.max(
+        1000,
+        spacingMeters
+      );
+
+    while (target < total) {
+      let index = 1;
 
       while (
-        coordinateIndex < distances.length - 1 &&
-        distances[coordinateIndex] < target
+        index <
+          cumulative.length &&
+        cumulative[index] <
+          target
       ) {
-        coordinateIndex += 1;
+        index += 1;
       }
 
-      samples.push(coordinates[coordinateIndex]);
+      if (
+        index >=
+        cumulative.length
+      ) {
+        break;
+      }
+
+      const beforeDistance =
+        cumulative[index - 1];
+      const afterDistance =
+        cumulative[index];
+      const denominator =
+        Math.max(
+          1,
+          afterDistance -
+            beforeDistance
+        );
+      const ratio =
+        clamp(
+          (
+            target -
+            beforeDistance
+          ) /
+            denominator,
+          0,
+          1
+        );
+      const before =
+        geometry[index - 1];
+      const after =
+        geometry[index];
+
+      result.push([
+        Number(before[0]) +
+          (
+            Number(after[0]) -
+            Number(before[0])
+          ) *
+            ratio,
+        Number(before[1]) +
+          (
+            Number(after[1]) -
+            Number(before[1])
+          ) *
+            ratio
+      ]);
+
+      target +=
+        Math.max(
+          1000,
+          spacingMeters
+        );
     }
 
-    return dedupeCoordinatePairs(samples);
-  }
+    result.push(
+      geometry[
+        geometry.length - 1
+      ]
+    );
 
-  function nearestSampleIndex(coordinates, samples) {
-    let bestIndex = 0;
-    let bestDistance = Infinity;
-
-    samples.forEach((sample, index) => {
-      const distance = distanceMeters(coordinates, sample);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        bestIndex = index;
-      }
-    });
-
-    return bestIndex;
-  }
-
-  function distanceToSamples(coordinates, samples) {
-    return Math.min(
-      ...samples.map(sample => distanceMeters(coordinates, sample))
+    return dedupeCoordinatePairs(
+      result
     );
   }
+
+  function reduceChunkPoints(
+    points,
+    maximum
+  ) {
+    if (
+      points.length <= maximum
+    ) {
+      return dedupeCoordinatePairs(
+        points
+      );
+    }
+
+    const reduced = [];
+
+    for (
+      let index = 0;
+      index < maximum;
+      index += 1
+    ) {
+      const sourceIndex =
+        Math.round(
+          index *
+            (
+              points.length - 1
+            ) /
+            Math.max(
+              1,
+              maximum - 1
+            )
+        );
+      reduced.push(
+        points[sourceIndex]
+      );
+    }
+
+    return dedupeCoordinatePairs(
+      reduced
+    );
+  }
+
+  function getDetourTier(
+    routeOffsetMeters
+  ) {
+    if (
+      routeOffsetMeters <=
+      PRACTICAL_RADIUS_METERS
+    ) {
+      return "practical";
+    }
+    if (
+      routeOffsetMeters <=
+      EXTENDED_RADIUS_METERS
+    ) {
+      return "extended";
+    }
+    return "destination";
+  }
+
 
   function findDecisionPoint(leg) {
     const steps = Array.isArray(leg?.steps) ? leg.steps : [];
@@ -2029,9 +3798,17 @@ out center tags meta;`;
   window.DetourEatsLiveRoute = {
     geocode,
     route,
+    routeTable,
     buildLiveTrip,
     refreshLiveTrip,
     cancelActiveRequests,
-    distanceMeters
+    distanceMeters,
+    __test: {
+      buildRouteContext,
+      buildRouteChunks,
+      projectPointToRoute,
+      determineSearchOutcome,
+      applyRouteMatrix
+    }
   };
 })();

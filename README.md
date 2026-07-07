@@ -1,4 +1,4 @@
-# DetourEats App v1.8.1 Hotfix
+# DetourEats App v1.8.2 Route Pipeline Repair
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -671,3 +671,58 @@ the old national demo list.
 The three prepopulated example-trip buttons were removed. Previously saved
 copies of those exact sample trips are also removed from Recent Trips.
 User-created recent trips remain available.
+
+
+## v1.8.2: Route Pipeline Repair
+
+This version replaces the previous single-query, exact-route-only workflow.
+
+### Segmented restaurant discovery
+
+- The route geometry is split into approximately 30-mile practical search sections
+- Extended and exceptional searches use larger, lower-count sections
+- Up to three practical sections and two optional sections are checked concurrently
+- Each section is cached independently
+- Failed sections do not erase successful sections
+- A failed restaurant service is explicitly different from a legitimate zero result
+- Current public Overpass endpoints are rotated by section
+
+### Actual distance to the route
+
+Restaurant distance is calculated to the nearest point on the route polyline,
+not merely to one of a few sampled route points. The projection also provides
+route progress and route-distribution buckets.
+
+### OSRM matrix screening
+
+Up to 20 shortlisted restaurants are screened in one OSRM Table request using:
+
+- origin to restaurant duration and distance
+- restaurant to final destination duration
+- baseline trip duration
+- calculated added trip time
+
+Only the strongest and most geographically distributed candidates receive
+individual exact route-through checks.
+
+### Exact-route fallback behavior
+
+If an individual exact route check times out, the restaurant is retained with a
+clearly labeled matrix-estimated added time. It is no longer silently discarded.
+
+### Search-result states
+
+The interface distinguishes:
+
+- restaurant search unavailable
+- no mapped restaurants returned
+- restaurants found but route timing unavailable
+- restaurants found but none met active limits
+- partial results retained
+- restaurants found and routed
+
+### Demo removal
+
+All remaining demo controls were removed. The global curated restaurant list is
+only used as a source pool for route-relevance filtering and can never appear as
+a standalone fallback route.
