@@ -1,4 +1,4 @@
-# DetourEats App v0.5
+# DetourEats App v0.5.1
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -146,3 +146,11 @@ Important limitations:
 - Route position remains manually sequenced
 - Opening status is based on the simulated trip time, not live navigation
 - The prototype should not be treated as live routing software
+
+
+## v0.5.1: Style selector fix
+
+The trip style now materially changes scoring:
+- Hungry Soon favors earlier acceptable stops and penalizes waiting.
+- Balanced weighs food quality and trip cost together.
+- Food Adventure tolerates more waiting and detour time for destination-worthy food.

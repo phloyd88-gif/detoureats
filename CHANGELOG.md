@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.1
+- Fixed trip style selector so it materially changes recommendations.
+- Added urgency scoring.
+- Hungry Soon now favors earlier acceptable stops.
+- Food Adventure now tolerates more waiting for standout restaurants.
+- Added style-specific explanation text.
+
+
 ## v0.5
 - Replaced fictional restaurants with a curated real test corridor.
 - Added source links, data confidence, verification dates, addresses, and published hours.

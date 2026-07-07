@@ -105,23 +105,67 @@ It is restaurant quality filtered through trip fit.
     const backtrackFit = c.backtracking ? 0 : 100;
     const scarcityFit = scoreScarcity(c, allCandidates, settings);
 
-    const tripFit = clamp(
-      timeFit * 0.42 +
-      openFit * 0.18 +
-      chainFit * 0.10 +
-      backtrackFit * 0.18 +
-      scarcityFit * 0.12
-    );
+    const style = String(settings.tripMode || "balanced").toLowerCase();
+    const distanceAhead = Math.max(0, c.seq - number(settings.routePosition, 0));
+    const urgencyFit = scoreUrgency(distanceAhead, style);
 
-    let detourScore = clamp(
-      restaurantQuality * 0.64 +
-      tripFit * 0.36
-    );
+    let tripFit;
+    let detourScore;
 
-    // "Best available" rule:
-    // If food quality is decent and there are no better options soon, don't undersell it.
+    if (style.includes("hungry")) {
+      tripFit = clamp(
+        timeFit * 0.32 +
+        openFit * 0.18 +
+        chainFit * 0.08 +
+        backtrackFit * 0.14 +
+        scarcityFit * 0.08 +
+        urgencyFit * 0.20
+      );
+
+      detourScore = clamp(
+        restaurantQuality * 0.48 +
+        tripFit * 0.52
+      );
+
+      if (distanceAhead <= 2 && restaurantQuality >= 72 && c.openAtArrival !== false) {
+        detourScore += 7;
+      }
+      if (distanceAhead >= 4) {
+        detourScore -= Math.min(14, (distanceAhead - 3) * 4);
+      }
+    } else if (style.includes("adventure") || style.includes("food")) {
+      tripFit = clamp(
+        timeFit * 0.24 +
+        openFit * 0.16 +
+        chainFit * 0.10 +
+        backtrackFit * 0.15 +
+        scarcityFit * 0.15 +
+        urgencyFit * 0.20
+      );
+
+      detourScore = clamp(
+        restaurantQuality * 0.76 +
+        tripFit * 0.24
+      );
+
+      if (c.destinationWorthiness >= 92) detourScore += 4;
+    } else {
+      tripFit = clamp(
+        timeFit * 0.42 +
+        openFit * 0.18 +
+        chainFit * 0.10 +
+        backtrackFit * 0.18 +
+        scarcityFit * 0.12
+      );
+
+      detourScore = clamp(
+        restaurantQuality * 0.64 +
+        tripFit * 0.36
+      );
+    }
+
     if (restaurantQuality >= 74 && scarcityFit >= 88) {
-      detourScore = Math.max(detourScore, 84);
+      detourScore = Math.max(detourScore, style.includes("hungry") ? 86 : 84);
     }
 
     // Guardrail: convenience cannot make mediocre food look elite.
@@ -140,6 +184,8 @@ It is restaurant quality filtered through trip fit.
       tripFit: Math.round(tripFit),
       timeFit: Math.round(timeFit),
       scarcityFit: Math.round(scarcityFit),
+      urgencyFit: Math.round(urgencyFit),
+      style,
       detourScore,
       tier,
       maxAdded
@@ -155,6 +201,8 @@ It is restaurant quality filtered through trip fit.
       tripFit: Math.round(tripFit),
       timeFit: Math.round(timeFit),
       scarcityFit: Math.round(scarcityFit),
+      urgencyFit: Math.round(urgencyFit),
+      styleApplied: style,
       scoreExplanation
     };
   }
@@ -184,6 +232,26 @@ It is restaurant quality filtered through trip fit.
     return 58;
   }
 
+  function scoreUrgency(distanceAhead, style) {
+    if (style.includes("hungry")) {
+      if (distanceAhead <= 1) return 100;
+      if (distanceAhead === 2) return 92;
+      if (distanceAhead === 3) return 76;
+      if (distanceAhead === 4) return 58;
+      return 35;
+    }
+
+    if (style.includes("adventure") || style.includes("food")) {
+      if (distanceAhead <= 2) return 78;
+      if (distanceAhead <= 5) return 92;
+      return 84;
+    }
+
+    if (distanceAhead <= 2) return 94;
+    if (distanceAhead <= 4) return 84;
+    return 68;
+  }
+
   function tierForScore(score) {
     return TIER_RULES.find(rule => score >= rule.min) || TIER_RULES[TIER_RULES.length - 1];
   }
@@ -203,6 +271,9 @@ It is restaurant quality filtered through trip fit.
     else bullets.push("Solid available food choice for this stretch.");
 
     if (s.scarcityFit >= 88) bullets.push("No clearly better option is coming up soon.");
+    if (s.style.includes("hungry")) bullets.push("Hungry Soon mode favors an earlier acceptable stop.");
+    else if (s.style.includes("adventure") || s.style.includes("food")) bullets.push("Food Adventure mode is willing to wait for a stronger destination stop.");
+    else bullets.push("Balanced mode weighs food quality and trip cost together.");
     if (c.famousFor) bullets.push(`Known for: ${c.famousFor}.`);
 
     return {
@@ -210,6 +281,8 @@ It is restaurant quality filtered through trip fit.
       tripFit: s.tripFit,
       timeFit: s.timeFit,
       scarcityFit: s.scarcityFit,
+      urgencyFit: s.urgencyFit,
+      style: s.style,
       detourScore: s.detourScore,
       tier: s.tier.tier,
       bullets

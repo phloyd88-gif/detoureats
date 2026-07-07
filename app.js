@@ -393,6 +393,7 @@ function renderDetailsPanel(pick, trip, copy) {
       <div><strong>${explanation.tripFit}</strong><span>Trip Fit</span></div>
       <div><strong>${explanation.timeFit}</strong><span>Time</span></div>
       <div><strong>${explanation.scarcityFit}</strong><span>Scarcity</span></div>
+      <div><strong>${explanation.urgencyFit ?? "—"}</strong><span>Urgency</span></div>
     </div>
   ` : "";
 
