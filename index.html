@@ -190,6 +190,14 @@
                 <small>Keep a quiet bucket-list scan running up to about 25 miles from the route, regardless of Eating Priority.</small>
               </span>
             </label>
+
+            <label class="check-row tester-mode-setting">
+              <input id="testerModeInput" type="checkbox">
+              <span>
+                <strong>Field tester mode</strong>
+                <small>Record recommendations, candidate outcomes, and place reports for route testing. Hidden during normal use.</small>
+              </span>
+            </label>
           </div>
         </details>
 
@@ -356,6 +364,7 @@
         <button id="fasterButton" class="driver-action" type="button">Eat Sooner</button>
         <button id="recheckRouteButton" class="driver-action hidden" type="button">Recheck Route</button>
         <button id="rateLastStopButton" class="driver-action hidden" type="button">Rate Last Stop</button>
+        <button id="reportPlaceButton" class="driver-action" type="button">Report Place</button>
       </div>
 
 
@@ -402,6 +411,36 @@
       </section>
 
       <section id="detailsPanel" class="panel details-panel hidden"></section>
+
+
+      <section id="fieldTestPanel" class="field-test-panel hidden" aria-live="polite">
+        <div class="field-test-heading">
+          <div>
+            <span>Field tester mode</span>
+            <strong>Restaurant intelligence audit</strong>
+          </div>
+          <div class="field-test-status">
+            <span id="fieldTestSnapshotCount">0 snapshots</span>
+            <span id="fieldTestIssueCount">0 reports</span>
+          </div>
+        </div>
+
+        <div id="fieldTestCurrentSummary" class="field-test-current-summary"></div>
+        <div id="fieldTestCandidateAudit" class="field-test-candidate-audit"></div>
+
+        <div class="field-test-actions">
+          <button id="exportFieldTestJsonButton" class="secondary" type="button">Export JSON</button>
+          <button id="exportFieldTestCsvButton" class="secondary" type="button">Export CSV</button>
+          <button id="clearFieldTestButton" class="text-button" type="button">Clear test data</button>
+        </div>
+
+        <small>
+          Review providers are not connected in this beta. This audit uses curated data,
+          OpenStreetMap metadata, route calculations, and your test feedback.
+        </small>
+      </section>
+
+
 
       <button id="demoToggleButton" class="debug-toggle" type="button">Show Demo Controls</button>
 
@@ -450,6 +489,40 @@
     </section>
   </main>
 
+
+  <div id="placeIssueModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="placeIssueTitle">
+    <section class="place-issue-card">
+      <div class="place-issue-heading">
+        <div>
+          <span>Field report</span>
+          <strong id="placeIssueTitle">What is wrong with this place?</strong>
+        </div>
+        <button id="closePlaceIssueButton" class="skip-close" type="button" aria-label="Close report">×</button>
+      </div>
+
+      <p id="placeIssueRestaurantName">Current recommendation</p>
+
+      <div class="place-issue-options">
+        <button type="button" data-place-issue="closed">Closed or gone</button>
+        <button type="button" data-place-issue="hours">Hours are wrong</button>
+        <button type="button" data-place-issue="location">Wrong location</button>
+        <button type="button" data-place-issue="duplicate">Duplicate listing</button>
+        <button type="button" data-place-issue="detour">Detour time is wrong</button>
+        <button type="button" data-place-issue="quality">Not worth the recommendation</button>
+      </div>
+
+      <label class="place-issue-notes">
+        Optional notes
+        <textarea id="placeIssueNotes" rows="3" placeholder="What happened?"></textarea>
+      </label>
+
+      <div class="place-issue-actions">
+        <button id="savePlaceIssueButton" class="primary" type="button" disabled>Save Report</button>
+        <button id="cancelPlaceIssueButton" class="secondary" type="button">Cancel</button>
+      </div>
+    </section>
+  </div>
+
   <div id="navigationModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="navigationModalTitle">
     <section class="navigation-modal-card">
       <div class="navigation-modal-heading">
@@ -486,6 +559,7 @@
   <script src="engine.js"></script>
   <script src="live-route.js"></script>
   <script src="address-search.js"></script>
+  <script src="restaurant-intelligence.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

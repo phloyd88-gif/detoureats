@@ -1,4 +1,4 @@
-/* DetourEats v1.7 Beta exceptional-detour discovery module
+/* DetourEats v1.8 Beta intelligence-ready route discovery module
    No account or API token is required.
 
    Prototype services:
@@ -416,6 +416,7 @@
           distanceAheadMiles: milesAhead,
           arrivalClock: formatClock(arrival),
           arrivalTime: formatClock(arrival),
+          arrivalTimestamp: arrival.getTime(),
           decisionMinutes: Math.max(
             0,
             Math.ceil(Number(decision.seconds || 0) / 60)
@@ -939,6 +940,10 @@ out center tags meta;`;
     const name = String(tags.name || "").trim();
     if (!name) return null;
 
+    if (isClosedLifecycleFeature(tags)) {
+      return null;
+    }
+
     const coordinates = element.type === "node"
       ? [Number(element.lon), Number(element.lat)]
       : [
@@ -1134,6 +1139,11 @@ out center tags meta;`;
         "Not listed in OpenStreetMap",
       website,
       phone,
+      wikipedia,
+      wikidata,
+      award,
+      stars,
+      description,
       confidence,
       discoveryConfidence,
       provenance: "route-discovered",
@@ -1176,6 +1186,34 @@ out center tags meta;`;
         routeOffsetMiles * 1.4 -
         (chain ? 18 : 0)
     };
+  }
+
+  function isClosedLifecycleFeature(tags) {
+    const closedValues = [
+      tags.disused,
+      tags.abandoned,
+      tags.demolished,
+      tags.removed,
+      tags.closed,
+      tags["disused:amenity"],
+      tags["abandoned:amenity"],
+      tags["demolished:amenity"]
+    ]
+      .map(value => String(value || "").toLowerCase())
+      .filter(Boolean);
+
+    if (
+      closedValues.some(value =>
+        ["yes", "true", "restaurant", "cafe", "fast_food"].includes(value)
+      )
+    ) {
+      return true;
+    }
+
+    const hours = String(tags.opening_hours || "").trim();
+    if (/^(closed|off)$/i.test(hours)) return true;
+
+    return false;
   }
 
   function isStrictExceptionalDiscoveryCandidate(candidate) {
@@ -1377,18 +1415,72 @@ out center tags meta;`;
   }
 
   function dedupeCandidates(candidates) {
-    const seenIds = new Set();
-    const seenNames = new Set();
     const result = [];
 
     for (const candidate of candidates) {
-      const idKey = `${candidate.osmType}-${candidate.osmId}`;
-      const nameKey = normalizeName(candidate.name);
+      const duplicate = result.find(existing => {
+        if (
+          candidate.osmType &&
+          candidate.osmId &&
+          existing.osmType === candidate.osmType &&
+          existing.osmId === candidate.osmId
+        ) {
+          return true;
+        }
 
-      if (seenIds.has(idKey) || seenNames.has(nameKey)) continue;
-      seenIds.add(idKey);
-      seenNames.add(nameKey);
-      result.push(candidate);
+        const sameName =
+          normalizeName(existing.name) ===
+          normalizeName(candidate.name);
+        if (!sameName) return false;
+
+        if (
+          existing.address &&
+          candidate.address &&
+          normalizeName(existing.address) ===
+          normalizeName(candidate.address)
+        ) {
+          return true;
+        }
+
+        if (
+          Array.isArray(existing.coordinates) &&
+          Array.isArray(candidate.coordinates)
+        ) {
+          return distanceMeters(
+            existing.coordinates,
+            candidate.coordinates
+          ) <= 250;
+        }
+
+        return false;
+      });
+
+      if (!duplicate) {
+        result.push(candidate);
+        continue;
+      }
+
+      const duplicateIndex = result.indexOf(duplicate);
+      const existingEvidence = Number(
+        duplicate.destinationEvidenceScore || 0
+      );
+      const candidateEvidence = Number(
+        candidate.destinationEvidenceScore || 0
+      );
+
+      if (candidateEvidence > existingEvidence) {
+        result[duplicateIndex] = {
+          ...duplicate,
+          ...candidate,
+          duplicateMerged: true
+        };
+      } else {
+        result[duplicateIndex] = {
+          ...candidate,
+          ...duplicate,
+          duplicateMerged: true
+        };
+      }
     }
 
     return result;

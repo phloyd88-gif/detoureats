@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.8 Beta
+- Added Mapped, Promising, Verified DetourEats, and Curated Bucket List intelligence classifications.
+- Added visible Why This Place Is Special explanations, confidence scores, evidence signals, and data gaps.
+- Added a provider-neutral adapter registry for future licensed review, editorial, and forum integrations.
+- Explicitly labels that no licensed live review provider is connected in this beta.
+- Added conservative assessment for simple machine-readable arrival-hour schedules.
+- Added filtering for closed, abandoned, removed, demolished, and disused OpenStreetMap restaurant features.
+- Strengthened duplicate detection using restaurant name plus matching address or proximity within roughly 250 meters.
+- Preserved additional Wikipedia, Wikidata, award, star, description, website, phone, and hours metadata.
+- Added optional Field Tester Mode with recommendation and candidate audit logging.
+- Added candidate-level outcome explanations and route snapshot logging.
+- Added place-error reporting for closures, hours, location, duplicates, detour accuracy, and recommendation quality.
+- Added JSON and CSV field-test exports and local test-data clearing.
+
+
 ## v1.7 Beta
 - Added an always-on Exceptional Detour Override across every Eating Priority.
 - Added a strict 25-mile rare-place scan even when Eat Soon remains near the route.

@@ -1,4 +1,4 @@
-/* DetourEats v1.7 Beta app layer
+/* DetourEats v1.8 Beta restaurant intelligence and field-test layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -29,6 +29,7 @@ const els = {
   pricePreferenceInput: document.getElementById("pricePreferenceInput"),
   familyFriendlyInput: document.getElementById("familyFriendlyInput"),
   exceptionalAlertsInput: document.getElementById("exceptionalAlertsInput"),
+  testerModeInput: document.getElementById("testerModeInput"),
   currentTimeInput: document.getElementById("currentTimeInput"),
   startTripButton: document.getElementById("startTripButton"),
   voiceToggleButton: document.getElementById("voiceToggleButton"),
@@ -68,6 +69,22 @@ const els = {
   fasterButton: document.getElementById("fasterButton"),
   recheckRouteButton: document.getElementById("recheckRouteButton"),
   rateLastStopButton: document.getElementById("rateLastStopButton"),
+  reportPlaceButton: document.getElementById("reportPlaceButton"),
+  fieldTestPanel: document.getElementById("fieldTestPanel"),
+  fieldTestSnapshotCount: document.getElementById("fieldTestSnapshotCount"),
+  fieldTestIssueCount: document.getElementById("fieldTestIssueCount"),
+  fieldTestCurrentSummary: document.getElementById("fieldTestCurrentSummary"),
+  fieldTestCandidateAudit: document.getElementById("fieldTestCandidateAudit"),
+  exportFieldTestJsonButton: document.getElementById("exportFieldTestJsonButton"),
+  exportFieldTestCsvButton: document.getElementById("exportFieldTestCsvButton"),
+  clearFieldTestButton: document.getElementById("clearFieldTestButton"),
+  placeIssueModal: document.getElementById("placeIssueModal"),
+  placeIssueRestaurantName: document.getElementById("placeIssueRestaurantName"),
+  placeIssueNotes: document.getElementById("placeIssueNotes"),
+  savePlaceIssueButton: document.getElementById("savePlaceIssueButton"),
+  cancelPlaceIssueButton: document.getElementById("cancelPlaceIssueButton"),
+  closePlaceIssueButton: document.getElementById("closePlaceIssueButton"),
+  placeIssueButtons: Array.from(document.querySelectorAll("[data-place-issue]")),
   stopFeedbackPanel: document.getElementById("stopFeedbackPanel"),
   feedbackQuestion: document.getElementById("feedbackQuestion"),
   feedbackPrimaryActions: document.getElementById("feedbackPrimaryActions"),
@@ -126,6 +143,8 @@ let state = {
   pricePreference: "any",
   familyFriendly: false,
   exceptionalAlerts: true,
+  testerMode: false,
+  selectedPlaceIssue: "",
   excludedCategories: new Set(),
   deferUntilSeq: 0,
   minimumScore: 0,
@@ -153,13 +172,30 @@ let state = {
 };
 
 function getCandidates() {
-  if (state.routingMode === "live" && Array.isArray(state.liveCandidates)) {
-    return state.liveCandidates;
+  let candidates = [];
+
+  if (
+    state.routingMode === "live" &&
+    Array.isArray(state.liveCandidates)
+  ) {
+    candidates = state.liveCandidates;
+  } else if (Array.isArray(window.DETOUR_EATS_CANDIDATES)) {
+    candidates = window.DETOUR_EATS_CANDIDATES;
+  } else if (Array.isArray(window.candidates)) {
+    candidates = window.candidates;
+  } else if (Array.isArray(window.restaurants)) {
+    candidates = window.restaurants;
   }
-  if (Array.isArray(window.DETOUR_EATS_CANDIDATES)) return window.DETOUR_EATS_CANDIDATES;
-  if (Array.isArray(window.candidates)) return window.candidates;
-  if (Array.isArray(window.restaurants)) return window.restaurants;
-  return [];
+
+  const intelligence =
+    window.DetourEatsRestaurantIntelligence;
+
+  return intelligence?.enrichCandidates
+    ? intelligence.enrichCandidates(candidates, {
+        now: Date.now(),
+        routeMode: state.routingMode
+      })
+    : candidates;
 }
 
 function getEngineResult() {
@@ -476,6 +512,8 @@ function render() {
   renderTripTimeline(pick, result);
   renderDetailsPanel(pick, trip, copy);
   renderUpcoming(upcoming.length ? upcoming : getFallbackUpcoming(pick));
+  recordFieldTestSnapshot(result, pick, exceptionalOpportunity);
+  renderFieldTestPanel(result, pick);
 
   if (els.routePositionLabel) {
     els.routePositionLabel.textContent = describeRoutePosition();
@@ -490,6 +528,8 @@ function render() {
   els.recheckRouteButton.classList.toggle("hidden", state.routingMode !== "live");
   els.recheckRouteButton.textContent = state.routingBusy ? "Rechecking…" : "Recheck Route";
   els.rateLastStopButton.classList.toggle("hidden", !state.pendingVisit);
+  els.reportPlaceButton.disabled = !pick;
+  els.fieldTestPanel.classList.toggle("hidden", !state.testerMode);
   els.takeMeThereButton.textContent = pick ? "Add Stop & Navigate" : "Keep Watching";
   els.whyButton.textContent = state.detailsOpen ? "Hide Details" : "Tell Me Why";
   els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
@@ -886,6 +926,357 @@ function renderTrustSnapshot(pick) {
   `;
 }
 
+function renderRestaurantIntelligenceSummary(pick) {
+  const intel = pick?.intelligence;
+  if (!intel) return "";
+
+  const gaps = intel.dataGaps?.length
+    ? `${intel.dataGaps.length} known data gap${intel.dataGaps.length === 1 ? "" : "s"}`
+    : "No major data gaps recorded";
+
+  return `
+    <section class="restaurant-intelligence-summary">
+      <div class="restaurant-intelligence-heading">
+        <div class="intelligence-level ${escapeHtml(intel.level.className)}">
+          ${escapeHtml(intel.level.label)}
+        </div>
+        <strong>${escapeHtml(intel.confidenceLabel)} intelligence confidence</strong>
+      </div>
+      <p>${escapeHtml(intel.whySpecial)}</p>
+      <div class="intelligence-summary-meta">
+        <span>${escapeHtml(intel.hours.label)}</span>
+        <span>${escapeHtml(gaps)}</span>
+      </div>
+    </section>
+  `;
+}
+
+function renderRestaurantIntelligenceDetails(pick) {
+  const intel = pick?.intelligence;
+  if (!intel) return "";
+
+  const signals = (intel.signals || [])
+    .map(signal => `
+      <li>
+        <strong>${escapeHtml(signal.type)}</strong>
+        <span>${escapeHtml(signal.label)}</span>
+      </li>
+    `)
+    .join("");
+
+  const gaps = (intel.dataGaps || [])
+    .map(gap => `<li>${escapeHtml(gap)}</li>`)
+    .join("");
+
+  return `
+    <div class="intelligence-details-section">
+      <div class="intelligence-details-heading">
+        <div>
+          <span>Restaurant intelligence</span>
+          <h3>${escapeHtml(intel.level.label)}</h3>
+        </div>
+        <div class="intelligence-confidence-number">
+          <strong>${intel.confidenceScore}</strong>
+          <span>confidence</span>
+        </div>
+      </div>
+
+      <p class="intelligence-special-reason">
+        <strong>Why this place is special:</strong>
+        ${escapeHtml(intel.whySpecial)}
+      </p>
+
+      <div class="intelligence-detail-grid">
+        <div>
+          <span>Evidence source</span>
+          <strong>${escapeHtml(intel.sourceSummary)}</strong>
+        </div>
+        <div>
+          <span>Arrival hours</span>
+          <strong>${escapeHtml(intel.hours.label)}</strong>
+        </div>
+        <div>
+          <span>Live review feeds</span>
+          <strong>Not connected in this beta</strong>
+        </div>
+      </div>
+
+      <div class="intelligence-lists">
+        <div>
+          <h4>Signals used</h4>
+          <ul>${signals || "<li>No additional signals.</li>"}</ul>
+        </div>
+        <div>
+          <h4>Known data gaps</h4>
+          <ul>${gaps || "<li>No major data gaps recorded.</li>"}</ul>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function getFieldTestSettings() {
+  return {
+    tripMode: state.tripMode,
+    maxAdded: state.maxAdded,
+    stopType: state.stopType,
+    foodPreference: state.foodPreference,
+    chainPolicy: state.chainPolicy,
+    pricePreference: state.pricePreference,
+    familyFriendly: state.familyFriendly,
+    exceptionalAlerts: state.exceptionalAlerts,
+    minimumScore: state.minimumScore,
+    skippedIds: Array.from(state.skippedIds)
+  };
+}
+
+function recordFieldTestSnapshot(
+  result,
+  pick,
+  exceptionalOpportunity
+) {
+  if (!state.testerMode) return;
+
+  const intelligence =
+    window.DetourEatsRestaurantIntelligence;
+  if (!intelligence?.recordSnapshot) return;
+
+  intelligence.recordSnapshot({
+    route: {
+      origin: state.origin,
+      destination: state.destination,
+      routingMode: state.routingMode
+    },
+    routeUpdatedAt:
+      state.liveMetrics?.updatedAt ||
+      state.lastLiveRefreshAt ||
+      0,
+    settings: getFieldTestSettings(),
+    result: {
+      ...result,
+      pick,
+      exceptionalOpportunity
+    },
+    candidates:
+      result?.evaluated?.length
+        ? result.evaluated
+        : getCandidates()
+  });
+}
+
+function renderFieldTestPanel(result, pick) {
+  if (!els.fieldTestPanel || !state.testerMode) return;
+
+  const intelligence =
+    window.DetourEatsRestaurantIntelligence;
+  if (!intelligence) return;
+
+  const summary = intelligence.getFieldTestSummary();
+  const candidates =
+    result?.evaluated?.length
+      ? result.evaluated
+      : getCandidates();
+  const audit = intelligence.buildCandidateAudit(
+    candidates,
+    {
+      ...result,
+      pick
+    },
+    getFieldTestSettings()
+  );
+
+  els.fieldTestSnapshotCount.textContent =
+    `${summary.snapshots} snapshot${summary.snapshots === 1 ? "" : "s"}`;
+  els.fieldTestIssueCount.textContent =
+    `${summary.issues} report${summary.issues === 1 ? "" : "s"}`;
+
+  const intel = pick?.intelligence;
+  els.fieldTestCurrentSummary.innerHTML = pick
+    ? `
+      <div>
+        <span>Current recommendation</span>
+        <strong>${escapeHtml(pick.name)}</strong>
+      </div>
+      <div>
+        <span>Intelligence level</span>
+        <strong>${escapeHtml(intel?.level?.label || "Unknown")}</strong>
+      </div>
+      <div>
+        <span>Confidence</span>
+        <strong>${escapeHtml(intel?.confidenceLabel || "Unknown")} ${intel?.confidenceScore ? `(${intel.confidenceScore})` : ""}</strong>
+      </div>
+      <div>
+        <span>Provider status</span>
+        <strong>No live review provider connected</strong>
+      </div>
+    `
+    : `<p>No current recommendation.</p>`;
+
+  els.fieldTestCandidateAudit.innerHTML = `
+    <div class="field-audit-header">
+      <span>Candidate</span>
+      <span>Score</span>
+      <span>Intelligence</span>
+      <span>Outcome</span>
+    </div>
+    ${audit.slice(0, 12).map(row => `
+      <div class="field-audit-row">
+        <div>
+          <strong>${escapeHtml(row.name)}</strong>
+          <small>${escapeHtml(row.city)}</small>
+        </div>
+        <span>${row.score || "—"}</span>
+        <span>${escapeHtml(row.intelligenceLevel)} · ${row.intelligenceConfidence || "—"}</span>
+        <span>${escapeHtml(row.outcome)}</span>
+      </div>
+    `).join("")}
+  `;
+}
+
+function openPlaceIssueReport() {
+  const pick = state.currentPick;
+  if (!pick) {
+    showToast("Nothing to report", "No restaurant is currently recommended.");
+    return;
+  }
+
+  state.selectedPlaceIssue = "";
+  els.placeIssueRestaurantName.textContent =
+    pick.name;
+  els.placeIssueNotes.value = "";
+  els.savePlaceIssueButton.disabled = true;
+  els.placeIssueButtons.forEach(button =>
+    button.classList.remove("selected")
+  );
+  els.placeIssueModal.classList.remove("hidden");
+}
+
+function closePlaceIssueReport() {
+  els.placeIssueModal.classList.add("hidden");
+  state.selectedPlaceIssue = "";
+}
+
+function selectPlaceIssue(issueType) {
+  state.selectedPlaceIssue = issueType;
+  els.placeIssueButtons.forEach(button => {
+    button.classList.toggle(
+      "selected",
+      button.dataset.placeIssue === issueType
+    );
+  });
+  els.savePlaceIssueButton.disabled = !issueType;
+}
+
+function savePlaceIssueReport() {
+  const pick = state.currentPick;
+  const intelligence =
+    window.DetourEatsRestaurantIntelligence;
+
+  if (
+    !pick ||
+    !state.selectedPlaceIssue ||
+    !intelligence?.recordIssue
+  ) {
+    return;
+  }
+
+  intelligence.recordIssue({
+    restaurant: {
+      id: pick.id,
+      name: pick.name,
+      address: pick.address || "",
+      city: pick.city || "",
+      coordinates: pick.coordinates || null,
+      provenance: pick.provenance || "",
+      intelligenceLevel:
+        pick.intelligence?.level?.label || ""
+    },
+    issueType: state.selectedPlaceIssue,
+    notes: els.placeIssueNotes.value,
+    route: {
+      origin: state.origin,
+      destination: state.destination
+    },
+    routeMetrics: {
+      addedMinutes: pick.added,
+      distanceAheadMiles:
+        pick.distanceAheadMiles ?? null,
+      routeOffsetMiles:
+        pick.routeOffsetMiles ?? null
+    }
+  });
+
+  closePlaceIssueReport();
+  showToast(
+    "Place report saved",
+    "The report is included in Field Tester exports."
+  );
+  renderFieldTestPanel(
+    state.currentResult,
+    state.currentPick
+  );
+}
+
+function downloadFieldTestFile(
+  filename,
+  content,
+  mimeType
+) {
+  const blob = new Blob([content], {
+    type: mimeType
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportFieldTestJson() {
+  const intelligence =
+    window.DetourEatsRestaurantIntelligence;
+  if (!intelligence) return;
+
+  downloadFieldTestFile(
+    `detoureats-field-test-${Date.now()}.json`,
+    JSON.stringify(
+      intelligence.exportFieldTests(),
+      null,
+      2
+    ),
+    "application/json"
+  );
+}
+
+function exportFieldTestCsv() {
+  const intelligence =
+    window.DetourEatsRestaurantIntelligence;
+  if (!intelligence) return;
+
+  downloadFieldTestFile(
+    `detoureats-candidate-audit-${Date.now()}.csv`,
+    intelligence.exportCandidateCsv(),
+    "text/csv;charset=utf-8"
+  );
+}
+
+function clearFieldTestData() {
+  const intelligence =
+    window.DetourEatsRestaurantIntelligence;
+  intelligence?.clearFieldTests?.();
+  showToast(
+    "Field-test data cleared",
+    "Snapshots and place reports were removed from this browser."
+  );
+  renderFieldTestPanel(
+    state.currentResult,
+    state.currentPick
+  );
+}
+
 function renderDecisionCard(pick, trip, copy) {
   if (!pick) {
     els.decisionCard.innerHTML = `
@@ -949,6 +1340,8 @@ function renderDecisionCard(pick, trip, copy) {
         </div>
       </div>
     </div>
+
+    ${renderRestaurantIntelligenceSummary(pick)}
 
     <div class="score-driver-row">
       <div>
@@ -1122,6 +1515,12 @@ function renderTripTimeline(pick, result) {
                 : ""}
             </div>
           ` : ""}
+          ${candidate.intelligence ? `
+            <div class="timeline-intelligence ${escapeHtml(candidate.intelligence.level.className)}">
+              ${escapeHtml(candidate.intelligence.level.shortLabel)}
+              · ${escapeHtml(candidate.intelligence.confidenceLabel)} confidence
+            </div>
+          ` : ""}
           <div class="timeline-meta">
             <span>${escapeHtml(timing)}</span>
             <span>Adds ${candidate.added} min</span>
@@ -1254,6 +1653,8 @@ function renderDetailsPanel(pick, trip, copy) {
     <ul class="details-list">
       ${engineBullets.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
     </ul>
+
+    ${renderRestaurantIntelligenceDetails(pick)}
 
     <div class="trust-section">
       <h3>${pick.provenance === "route-discovered" ? "Available route data" : "Verified facts"}</h3>
@@ -1720,7 +2121,9 @@ function savePreferences() {
     pricePreference: els.pricePreferenceInput?.value || state.pricePreference || "any",
     familyFriendly: Boolean(els.familyFriendlyInput?.checked),
     exceptionalAlerts:
-      els.exceptionalAlertsInput?.checked !== false
+      els.exceptionalAlertsInput?.checked !== false,
+    testerMode:
+      Boolean(els.testerModeInput?.checked)
   };
 
   try {
@@ -1766,6 +2169,10 @@ function loadPreferences() {
     els.exceptionalAlertsInput.checked =
       saved.exceptionalAlerts !== false;
   }
+  if (els.testerModeInput) {
+    els.testerModeInput.checked =
+      Boolean(saved.testerMode);
+  }
 }
 
 function showToast(title, message) {
@@ -1795,6 +2202,8 @@ async function startTrip() {
   state.familyFriendly = Boolean(els.familyFriendlyInput?.checked);
   state.exceptionalAlerts =
     els.exceptionalAlertsInput?.checked !== false;
+  state.testerMode =
+    Boolean(els.testerModeInput?.checked);
   state.excludedCategories = new Set();
   state.deferUntilSeq = 0;
   state.minimumScore = 0;
@@ -2868,6 +3277,7 @@ function updateFromControls() {
   state.candidatePool = els.candidatePoolInput?.value || "All";
   state.hoursMode = els.hoursModeInput?.value || "requireOpen";
   state.currentTime = Number(els.currentTimeInput?.value || state.currentTime);
+  state.testerMode = Boolean(els.testerModeInput?.checked);
   render();
 }
 
@@ -2999,6 +3409,23 @@ els.exceptionalDismissButton.addEventListener(
   dismissExceptionalOpportunity
 );
 els.rateLastStopButton.addEventListener("click", openStopFeedback);
+els.reportPlaceButton.addEventListener("click", openPlaceIssueReport);
+els.placeIssueButtons.forEach(button => {
+  button.addEventListener("click", () =>
+    selectPlaceIssue(button.dataset.placeIssue)
+  );
+});
+els.savePlaceIssueButton.addEventListener("click", savePlaceIssueReport);
+els.cancelPlaceIssueButton.addEventListener("click", closePlaceIssueReport);
+els.closePlaceIssueButton.addEventListener("click", closePlaceIssueReport);
+els.placeIssueModal.addEventListener("click", event => {
+  if (event.target === els.placeIssueModal) {
+    closePlaceIssueReport();
+  }
+});
+els.exportFieldTestJsonButton.addEventListener("click", exportFieldTestJson);
+els.exportFieldTestCsvButton.addEventListener("click", exportFieldTestCsv);
+els.clearFieldTestButton.addEventListener("click", clearFieldTestData);
 els.closeFeedbackButton.addEventListener("click", closeStopFeedback);
 els.finishFeedbackButton.addEventListener("click", finishFeedback);
 els.feedbackPrimaryActions.querySelectorAll("[data-feedback-value]").forEach(button => {
@@ -3035,7 +3462,8 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
   els.chainPolicyInput,
   els.pricePreferenceInput,
   els.familyFriendlyInput,
-  els.exceptionalAlertsInput
+  els.exceptionalAlertsInput,
+  els.testerModeInput
 ].forEach(el => {
   if (!el) return;
   el.addEventListener("input", () => {

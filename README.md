@@ -1,4 +1,4 @@
-# DetourEats App v1.7 Beta
+# DetourEats App v1.8 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -570,3 +570,72 @@ The normal recommendation remains active unless the user selects **Add Stop**.
 For route-discovered restaurants, exceptional means the candidate cleared a
 strict available-data threshold. It does not mean DetourEats independently
 verified national reputation, awards, food quality, or operating hours.
+
+
+## v1.8 Beta: Restaurant Intelligence & Field Testing
+
+### Intelligence classifications
+
+Every restaurant is now classified as one of:
+
+- **Mapped restaurant**: route and identity data are available, but food quality is not verified
+- **Promising restaurant**: stronger map metadata and destination signals are present
+- **Verified DetourEats recommendation**: manually curated with a traceable source
+- **Curated bucket-list place**: curated food quality, uniqueness, and destination-worthiness clear a higher threshold
+
+Each recommendation displays:
+
+- why the place appears special
+- intelligence confidence
+- signals used
+- known data gaps
+- arrival-hours status
+- source summary
+- whether licensed live review feeds are connected
+
+### No fabricated review data
+
+This beta does not invent ratings or scrape review platforms. It uses:
+
+- the curated DetourEats dataset
+- OpenStreetMap business metadata
+- live route calculations
+- user feedback
+- field-test reports
+
+A provider-neutral adapter registry is included for future licensed Google,
+Tripadvisor, Yelp, editorial, or forum data sources.
+
+### Stronger business hygiene
+
+- Filters common OpenStreetMap lifecycle tags for closed, abandoned, removed,
+  demolished, or disused restaurant features
+- Merges same-name records only when the address matches or coordinates are
+  within approximately 250 meters
+- Preserves mapped Wikipedia, Wikidata, award, star, description, website,
+  hours, and phone metadata for intelligence analysis
+- Stores arrival timestamps for conservative schedule assessment
+
+### Field tester mode
+
+Optional Field Tester Mode records:
+
+- route and active settings
+- selected normal recommendation
+- exceptional opportunity
+- up to 30 evaluated candidates
+- Detour Score
+- added minutes
+- intelligence classification and confidence
+- candidate outcome or rejection explanation
+- place issue reports
+
+Test data can be exported as JSON or candidate-level CSV. It remains stored
+locally in the browser until cleared.
+
+### Hours limitation
+
+The beta evaluates only simple machine-readable OpenStreetMap schedules and
+24/7 listings. It labels those results as schedule-based rather than verified.
+Holiday changes, sellouts, temporary closures, and timezone transitions remain
+explicit data gaps.

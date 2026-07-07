@@ -1,4 +1,4 @@
-const CACHE_NAME = "detoureats-v1-7-beta";
+const CACHE_NAME = "detoureats-v1-8-beta";
 const ASSETS = [
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ const ASSETS = [
   "./engine.js",
   "./live-route.js",
   "./address-search.js",
+  "./restaurant-intelligence.js",
   "./app.js",
   "./manifest.webmanifest",
   "./icons/icon-192.svg",
