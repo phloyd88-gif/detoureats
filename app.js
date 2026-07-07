@@ -1,4 +1,4 @@
-/* DetourEats v1.8 Beta restaurant intelligence and field-test layer
+/* DetourEats v1.8.1 Hotfix route-safety and responsiveness layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -126,7 +126,7 @@ let state = {
   routePreviewStatus: "idle",
   currentCoordinates: null,
   locationAccuracy: null,
-  routingMode: "demo",
+  routingMode: "idle",
   routingBusy: false,
   routingMessage: "",
   liveCandidates: null,
@@ -1777,6 +1777,12 @@ const NAVIGATION_PREFERENCE_KEY = "detoureats_navigation_preference_v1";
 const PENDING_VISIT_KEY = "detoureats_pending_visit_v1";
 const LEARNED_PREFERENCES_KEY = "detoureats_learned_preferences_v1";
 const MAX_RECENT_TRIPS = 5;
+const REMOVED_DEMO_TRIP_KEYS = new Set([
+  "albany, ny|boston, ma",
+  "new york, ny|washington, dc",
+  "syracuse, ny|philadelphia, pa"
+]);
+const ROUTE_SETUP_TIMEOUT_MS = 36000;
 
 function getRouteSignature() {
   const originKey = state.locationIsOrigin && state.currentCoordinates
@@ -1806,8 +1812,34 @@ function invalidateRoutePreview() {
 
 function getRecentTrips() {
   try {
-    const trips = JSON.parse(localStorage.getItem(RECENT_TRIPS_STORAGE_KEY) || "[]");
-    return Array.isArray(trips) ? trips.slice(0, MAX_RECENT_TRIPS) : [];
+    const parsed = JSON.parse(
+      localStorage.getItem(
+        RECENT_TRIPS_STORAGE_KEY
+      ) || "[]"
+    );
+    if (!Array.isArray(parsed)) return [];
+
+    const cleaned = parsed.filter(trip => {
+      const key = `${
+        String(trip?.origin || "")
+          .trim()
+          .toLowerCase()
+      }|${
+        String(trip?.destination || "")
+          .trim()
+          .toLowerCase()
+      }`;
+      return !REMOVED_DEMO_TRIP_KEYS.has(key);
+    }).slice(0, MAX_RECENT_TRIPS);
+
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(
+        RECENT_TRIPS_STORAGE_KEY,
+        JSON.stringify(cleaned)
+      );
+    }
+
+    return cleaned;
   } catch {
     return [];
   }
@@ -1892,7 +1924,8 @@ function renderRoutePreview(message = "") {
         <div>
           <span>Checking route</span>
           <strong>${escapeHtml(message || state.routingMessage || "Calculating drive time and food options")}</strong>
-          <small>This may take several seconds on a long route.</small>
+          <small>Public route and restaurant services are being checked. The app will stop rather than spin indefinitely.</small>
+          <button id="cancelRouteCheckButton" class="text-button route-cancel-button" type="button">Cancel</button>
         </div>
       </div>
     `;
@@ -1987,6 +2020,45 @@ function validateRouteInputs() {
   return { originText, destinationText };
 }
 
+function cancelRouteCheck(
+  message = "Route check canceled."
+) {
+  window.DetourEatsLiveRoute
+    ?.cancelActiveRequests?.("user-cancel");
+
+  state.routePreview = null;
+  state.routePreviewSignature = "";
+  state.routePreviewStatus = "error";
+  state.routingMessage = "";
+  setRouteSetupBusy(false);
+  renderRoutePreview(message);
+}
+
+function withRouteSetupTimeout(promise) {
+  let timeoutId = null;
+
+  const timeoutPromise = new Promise(
+    (_, reject) => {
+      timeoutId = setTimeout(() => {
+        window.DetourEatsLiveRoute
+          ?.cancelActiveRequests?.("timeout");
+        reject(
+          new Error(
+            "The public route services did not respond quickly enough. Please try again."
+          )
+        );
+      }, ROUTE_SETUP_TIMEOUT_MS);
+    }
+  );
+
+  return Promise.race([
+    promise,
+    timeoutPromise
+  ]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
+
 async function previewSelectedRoute({ quiet = false } = {}) {
   const service = window.DetourEatsLiveRoute;
   if (!service?.buildLiveTrip) {
@@ -2005,10 +2077,15 @@ async function previewSelectedRoute({ quiet = false } = {}) {
     : state.originSelection?.label || originText;
   state.destination = state.destinationSelection?.label || destinationText;
   state.routePreviewStatus = "loading";
+  state.liveCandidates = null;
+  state.liveSession = null;
+  state.liveMetrics = null;
+  state.routingMode = "idle";
   setRouteSetupBusy(true, "Locating your route");
 
   try {
-    const result = await service.buildLiveTrip({
+    const result = await withRouteSetupTimeout(
+      service.buildLiveTrip({
       originCoordinates:
         state.locationIsOrigin && Array.isArray(state.currentCoordinates)
           ? state.currentCoordinates
@@ -2027,7 +2104,8 @@ async function previewSelectedRoute({ quiet = false } = {}) {
         state.routingMessage = message;
         renderRoutePreview(message);
       }
-    });
+    })
+    );
 
     state.routePreview = result;
     state.routePreviewSignature = signature;
@@ -2078,20 +2156,6 @@ function swapRoute() {
   invalidateRoutePreview();
 }
 
-function applyExampleRoute(origin, destination) {
-  state.locationEnabled = false;
-  state.locationIsOrigin = false;
-  state.currentCoordinates = null;
-  state.originSelection = null;
-  state.destinationSelection = null;
-  originAutocomplete?.clearSelection();
-  destinationAutocomplete?.clearSelection();
-  els.originInput.value = origin;
-  els.destinationInput.value = destination;
-  els.useLocationButton.textContent = "Use My Location";
-  updateLocationSetup("Example route selected", "Preview the route or start the trip.", "demo");
-  invalidateRoutePreview();
-}
 
 function loadSeamlessSettings() {
   try {
@@ -2245,7 +2309,7 @@ async function startTrip() {
     "Trip started",
     count > 0
       ? `${count} route-relevant food options are being evaluated.`
-      : "The route is active; DetourEats will keep watching for viable stops."
+      : "The live route is active, but no route-verified restaurant has qualified yet. Unrelated demo restaurants will not be substituted."
   );
 }
 
@@ -2260,7 +2324,7 @@ async function activateLiveRoute() {
 function applyLiveSnapshot(snapshot) {
   state.liveCandidates = snapshot?.candidates || [];
   state.liveMetrics = snapshot?.metrics || null;
-  state.routingMode = state.liveCandidates.length ? "live" : "demo";
+  state.routingMode = "live";
   state.routingMessage = "";
   state.routePosition = 0;
   state.lookahead = 99;
@@ -2294,7 +2358,7 @@ function getActualCurrentMinutes() {
 function goBack() {
   stopLocationWatch();
   state.started = false;
-  state.routingMode = "demo";
+  state.routingMode = "idle";
   state.liveCandidates = null;
   state.liveSession = null;
   state.liveMetrics = null;
@@ -3359,15 +3423,14 @@ els.voiceToggleButton.addEventListener("click", toggleVoiceGuidance);
 els.previewRouteButton.addEventListener("click", () => {
   previewSelectedRoute().catch(() => {});
 });
+els.routePreviewCard.addEventListener("click", event => {
+  if (event.target?.id === "cancelRouteCheckButton") {
+    cancelRouteCheck();
+  }
+});
 els.useLocationButton.addEventListener("click", requestCurrentLocation);
 els.swapRouteButton.addEventListener("click", swapRoute);
 els.clearRecentTripsButton.addEventListener("click", clearRecentTrips);
-document.querySelectorAll("[data-origin][data-destination]").forEach(button => {
-  button.addEventListener("click", () => {
-    applyExampleRoute(button.dataset.origin, button.dataset.destination);
-  });
-});
-
 els.originInput.addEventListener("input", () => {
   if (els.originInput.value !== "Current location") {
     state.locationEnabled = false;

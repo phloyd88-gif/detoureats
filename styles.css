@@ -1578,26 +1578,6 @@ button:disabled {
   opacity: 0.55;
   cursor: wait;
 }
-.route-example-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin: -1px 0 14px;
-}
-.route-example {
-  padding: 7px 9px;
-  border: 1px solid #e2e8f0;
-  border-radius: 999px;
-  background: #ffffff;
-  color: #475569;
-  font-size: 10px;
-  font-weight: 800;
-  cursor: pointer;
-}
-.route-example:hover {
-  border-color: #86efac;
-  color: #166534;
-}
 
 .recent-trips-section {
   margin-bottom: 14px;
@@ -2840,4 +2820,14 @@ button:disabled {
   .place-issue-actions {
     grid-template-columns: 1fr;
   }
+}
+
+
+/* v1.8.1 Hotfix */
+.route-preview-loading > div {
+  position: relative;
+}
+.route-cancel-button {
+  display: inline-flex;
+  margin-top: 8px;
 }

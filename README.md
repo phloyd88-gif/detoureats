@@ -1,4 +1,4 @@
-# DetourEats App v1.8 Beta
+# DetourEats App v1.8.1 Hotfix
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -639,3 +639,35 @@ The beta evaluates only simple machine-readable OpenStreetMap schedules and
 24/7 listings. It labels those results as schedule-based rather than verified.
 Holiday changes, sellouts, temporary closures, and timezone transitions remain
 explicit data gaps.
+
+
+## v1.8.1 Hotfix: Route Correctness and Responsiveness
+
+### Fixed unrelated restaurant fallback
+
+A successful live route with zero completed restaurant candidates previously
+changed the app back to demo mode. That allowed the global curated test list to
+appear on unrelated routes, including Virginia restaurants on a New York to New
+Hampshire trip.
+
+The app now remains in live-route mode whenever the route itself succeeds.
+Zero candidates means zero route-verified recommendations. It never substitutes
+the old national demo list.
+
+### Faster failure and cancellation
+
+- Geocoding requests time out after approximately 8 seconds
+- Main route requests time out after approximately 9 seconds
+- Restaurant discovery tiers have strict 5.5 to 8.5 second budgets
+- Optional extended and exceptional searches run concurrently
+- Candidate detour routes are checked with five concurrent workers
+- Candidate routing has a total approximately 13-second budget
+- The full setup has a 36-second hard stop
+- The user can cancel an active route check
+- Starting a new check cancels old in-flight requests
+
+### Cleaner setup
+
+The three prepopulated example-trip buttons were removed. Previously saved
+copies of those exact sample trips are also removed from Recent Trips.
+User-created recent trips remain available.

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.8.1 Hotfix
+- Removed the three prepopulated example-trip buttons.
+- Removes previously saved copies of the exact old demo trips from Recent Trips.
+- Fixed zero live candidates incorrectly switching the app back to demo mode.
+- Prevented unrelated curated restaurants from appearing on arbitrary live routes.
+- Added strict geocoding, baseline-route, discovery, and candidate-routing time budgets.
+- Added request cancellation when a new route starts or the user presses Cancel.
+- Runs optional wider discovery searches concurrently.
+- Checks candidate detour routes concurrently with a hard total budget.
+- Removed sequential re-geocoding of curated restaurants that already have coordinates.
+- Added a 36-second overall route-setup hard stop instead of indefinite loading.
+- Clears stale route state before checking a newly entered route.
+
+
 ## v1.8 Beta
 - Added Mapped, Promising, Verified DetourEats, and Curated Bucket List intelligence classifications.
 - Added visible Why This Place Is Special explanations, confidence scores, evidence signals, and data gaps.
