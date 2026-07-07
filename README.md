@@ -1,4 +1,4 @@
-# DetourEats App v0.3.2
+# DetourEats App v0.4
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -103,3 +103,24 @@ Still simulated:
 
 - Removed language implying the driver has to guess.
 - Updated Best Available language to reinforce the product promise: DetourEats makes the call.
+
+
+## v0.4 focus: Detour Score Engine
+
+This version makes Detour Score more explicit and explainable.
+
+New:
+- Dedicated Detour Score engine in `engine.js`
+- Richer sample route data in `data.js`
+- Score components:
+  - Restaurant quality
+  - Trip fit
+  - Added-time fit
+  - Scarcity / better-option-ahead logic
+- Guardrail: convenience cannot make mediocre food look elite
+- Best Available rule: the app still recommends the strongest available stop when food timing matters
+- Score explanation shown in the details panel
+
+Detour Score now means:
+
+> How good of a food decision is this stop for this traveler on this trip right now?

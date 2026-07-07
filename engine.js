@@ -1,219 +1,236 @@
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
+/* DetourEats v0.4 Scoring Engine
 
-function routeConfidenceScore(value) {
-  if (value === "High") return 10;
-  if (value === "Medium") return 7;
-  return 4;
-}
+Detour Score means:
+"How good of a food decision is this stop for this traveler on this trip right now?"
 
-function mealFitScore(candidate, mealType) {
-  if (mealType === "breakfast") return candidate.breakfastFit ?? 1;
-  if (mealType === "lunch") return candidate.lunchFit ?? 5;
-  if (mealType === "dinner") return candidate.dinnerFit ?? 5;
-  return candidate.dessertFit ?? 2;
-}
+It is not just restaurant quality.
+It is restaurant quality filtered through trip fit.
+*/
 
-function minutesToClock(totalMinutes) {
-  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
-  const h24 = Math.floor(normalized / 60);
-  const mins = normalized % 60;
-  const ampm = h24 >= 12 ? "PM" : "AM";
-  const h12 = h24 % 12 || 12;
-  return `${h12}:${String(mins).padStart(2, "0")} ${ampm}`;
-}
+(function () {
+  const TIER_RULES = [
+    { min: 97, tier: "Bucket List Stop", state: "bucket-list" },
+    { min: 92, tier: "Worth the Detour", state: "this-is-your-stop" },
+    { min: 84, tier: "Best Stop Ahead", state: "found-something" },
+    { min: 0, tier: "Best Available", state: "best-available" }
+  ];
 
-function parseClock(value) {
-  const [h, m] = value.split(":").map(Number);
-  return h * 60 + m;
-}
+  function recommend(candidates, settings = {}) {
+    const normalized = (candidates || []).map(normalizeCandidate);
+    const visible = filterCandidates(normalized, settings);
+    const scored = visible
+      .map(candidate => scoreCandidate(candidate, settings, normalized))
+      .sort((a, b) => b.detourScore - a.detourScore);
 
-function parseWindow(windowText) {
-  const [start, end] = windowText.split("-");
-  return { start: parseClock(start), end: parseClock(end) };
-}
+    const pick = scored[0] || null;
 
-function mealForArrivalTime(arrivalMinutes) {
-  const t = ((arrivalMinutes % 1440) + 1440) % 1440;
-  if (t >= 300 && t < 630) return "breakfast";
-  if (t >= 630 && t < 900) return "lunch";
-  if (t >= 900 && t < 1260) return "dinner";
-  return "snack";
-}
-
-function estimatedArrivalMinutes(candidate, settings) {
-  const stopsAhead = Math.max(0, candidate.seq - settings.routePosition);
-  return settings.currentTime + stopsAhead * 45;
-}
-
-function effectiveMealType(candidate, settings) {
-  if (settings.mealMode === "manual") return settings.mealType;
-  return mealForArrivalTime(estimatedArrivalMinutes(candidate, settings));
-}
-
-function openingStatus(candidate, arrivalMinutes, settings) {
-  if (!candidate.hours || !candidate.hours[settings.travelDay]) {
-    return { status: "unknown", label: "Hours unknown", open: false, opensSoon: false, display: "Hours unknown" };
+    return {
+      pick,
+      upcoming: scored.slice(0, 6),
+      evaluated: scored,
+      explanation: pick ? pick.scoreExplanation : null,
+      reason: pick ? "recommended" : "no_candidate_available"
+    };
   }
 
-  const t = ((arrivalMinutes % 1440) + 1440) % 1440;
-  const windows = candidate.hours[settings.travelDay] || [];
+  function normalizeCandidate(c) {
+    const added = number(c.estimatedAddedMinutes ?? c.addedMinutes ?? c.addedTime ?? c.detourMinutes, 12);
+    const quality = number(c.foodReputation ?? c.quality ?? c.ratingScore ?? c.destinationEvidence, 75);
+    const uniqueness = number(c.uniqueness ?? c.uniquenessScore, 60);
+    const confidence = number(c.reviewConfidence ?? c.confidence ?? c.reviewStrength, 70);
+    const consistency = number(c.consistency ?? c.reviewConsistency, 70);
+    const destination = number(c.destinationWorthiness ?? c.destinationEvidence ?? c.destinationScore, quality);
+    const seq = number(c.seq ?? c.sequence ?? c.routeIndex, 0);
 
-  if (!windows.length) {
-    return { status: "closed", label: "Closed at ETA", open: false, opensSoon: false, display: "Closed today" };
+    return {
+      ...c,
+      id: String(c.id ?? c.name ?? seq),
+      name: c.name ?? "Unnamed Stop",
+      seq,
+      category: c.category ?? c.cuisine ?? "Local food",
+      chain: Boolean(c.chain),
+      estimatedAddedMinutes: added,
+      foodReputation: quality,
+      uniqueness,
+      reviewConfidence: confidence,
+      consistency,
+      destinationWorthiness: destination,
+      famousFor: c.famousFor ?? c.signatureDish ?? c.signatureItem ?? c.tagline ?? "Local favorite",
+      evidenceSummary: c.evidenceSummary ?? c.summary ?? c.why ?? c.famousFor ?? "Strong food stop for this route.",
+      arrivalClock: c.arrivalClock ?? c.arrivalTime ?? c.eta ?? "",
+      openAtArrival: c.openAtArrival ?? c.isOpen ?? true,
+      backtracking: Boolean(c.backtracking),
+      betterOptionMilesAhead: c.betterOptionMilesAhead ?? null
+    };
   }
 
-  for (const w of windows) {
-    const parsed = parseWindow(w);
+  function filterCandidates(candidates, settings) {
+    const routePosition = number(settings.routePosition, 0);
+    const lookahead = number(settings.lookahead, 5);
+    const maxSeq = lookahead >= 99 ? Infinity : routePosition + lookahead;
 
-    if (parsed.start <= parsed.end) {
-      if (t >= parsed.start && t <= parsed.end) {
-        return { status: "open", label: "Open at ETA", open: true, opensSoon: false, display: `${minutesToClock(parsed.start)}-${minutesToClock(parsed.end)}` };
+    return candidates.filter(c => {
+      if (c.seq < routePosition) return false;
+      if (c.seq > maxSeq) return false;
+      if (settings.hideChains !== false && c.chain) return false;
+      if (c.backtracking) return false;
+      if (settings.hoursMode !== "warnOnly" && c.openAtArrival === false) return false;
+      if (settings.candidatePool && settings.candidatePool !== "All") {
+        const haystack = [
+          c.category,
+          c.segment,
+          c.bucket,
+          ...(Array.isArray(c.tags) ? c.tags : [])
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!haystack.includes(String(settings.candidatePool).toLowerCase())) return false;
       }
-      const minutesUntilOpen = parsed.start - t;
-      if (minutesUntilOpen > 0 && minutesUntilOpen <= 45) {
-        return { status: "opensSoon", label: `Opens ${minutesUntilOpen} min after ETA`, open: false, opensSoon: true, display: `${minutesToClock(parsed.start)}-${minutesToClock(parsed.end)}` };
-      }
+      return true;
+    });
+  }
+
+  function scoreCandidate(c, settings, allCandidates) {
+    const maxAdded = number(settings.maxAdded ?? settings.maxAddedMinutes, 10);
+
+    const restaurantQuality = clamp(
+      c.foodReputation * 0.38 +
+      c.destinationWorthiness * 0.24 +
+      c.uniqueness * 0.18 +
+      c.consistency * 0.12 +
+      c.reviewConfidence * 0.08
+    );
+
+    const timeFit = scoreAddedTime(c.estimatedAddedMinutes, maxAdded);
+    const openFit = c.openAtArrival === false ? 45 : 100;
+    const chainFit = c.chain ? 55 : 100;
+    const backtrackFit = c.backtracking ? 0 : 100;
+    const scarcityFit = scoreScarcity(c, allCandidates, settings);
+
+    const tripFit = clamp(
+      timeFit * 0.42 +
+      openFit * 0.18 +
+      chainFit * 0.10 +
+      backtrackFit * 0.18 +
+      scarcityFit * 0.12
+    );
+
+    let detourScore = clamp(
+      restaurantQuality * 0.64 +
+      tripFit * 0.36
+    );
+
+    // "Best available" rule:
+    // If food quality is decent and there are no better options soon, don't undersell it.
+    if (restaurantQuality >= 74 && scarcityFit >= 88) {
+      detourScore = Math.max(detourScore, 84);
     }
 
-    if (parsed.start > parsed.end && (t >= parsed.start || t <= parsed.end)) {
-      return { status: "open", label: "Open at ETA", open: true, opensSoon: false, display: `${minutesToClock(parsed.start)}-${minutesToClock(parsed.end)}` };
+    // Guardrail: convenience cannot make mediocre food look elite.
+    if (restaurantQuality < 82) {
+      detourScore = Math.min(detourScore, 89);
     }
+    if (restaurantQuality < 74) {
+      detourScore = Math.min(detourScore, 82);
+    }
+
+    detourScore = Math.round(detourScore);
+
+    const tier = tierForScore(detourScore);
+    const scoreExplanation = explainScore(c, {
+      restaurantQuality: Math.round(restaurantQuality),
+      tripFit: Math.round(tripFit),
+      timeFit: Math.round(timeFit),
+      scarcityFit: Math.round(scarcityFit),
+      detourScore,
+      tier,
+      maxAdded
+    });
+
+    return {
+      ...c,
+      score: detourScore,
+      detourScore,
+      tier: tier.tier,
+      tripState: tier.state,
+      restaurantQuality: Math.round(restaurantQuality),
+      tripFit: Math.round(tripFit),
+      timeFit: Math.round(timeFit),
+      scarcityFit: Math.round(scarcityFit),
+      scoreExplanation
+    };
   }
 
-  return { status: "closed", label: "Closed at ETA", open: false, opensSoon: false, display: windows.join(", ") };
-}
-
-function corridorEligible(candidate, selectedCorridor) {
-  if (selectedCorridor === "All") return true;
-  if (candidate.corridor === selectedCorridor) return true;
-  if (candidate.corridor === "A/B" && ["A", "B", "A/B"].includes(selectedCorridor)) return true;
-  if (selectedCorridor === "A/B" && candidate.corridor === "A/B") return true;
-  return false;
-}
-
-function poolEligible(candidate, selectedPool) {
-  if (selectedPool === "All") return true;
-  return candidate.candidateType === selectedPool;
-}
-
-function isBehind(candidate, routePosition) {
-  return candidate.seq <= routePosition;
-}
-
-function isInLookahead(candidate, settings) {
-  if (settings.lookahead >= 99) return true;
-  return candidate.seq > settings.routePosition && candidate.seq <= settings.routePosition + settings.lookahead;
-}
-
-function internetEvidenceScore(candidate) {
-  return (
-    (candidate.destinationEvidence ?? 5) * 0.35 +
-    (candidate.signatureEvidence ?? 5) * 0.30 +
-    (candidate.uniqueness ?? 5) * 0.20 +
-    routeConfidenceScore(candidate.routeFitConfidence) * 0.15
-  );
-}
-
-function rejectionReason(candidate, settings, arrivalMinutes) {
-  if (!poolEligible(candidate, settings.candidatePool)) return "Hidden by candidate pool";
-  if (!corridorEligible(candidate, settings.corridor)) return "Hidden by corridor";
-  if (isBehind(candidate, settings.routePosition)) return "Behind you";
-  if (!isInLookahead(candidate, settings)) return "Too far ahead";
-  if (candidate.chain && settings.hideChains) return "Chain hidden";
-
-  const hours = openingStatus(candidate, arrivalMinutes, settings);
-  if (settings.hoursMode === "requireOpen" && hours.status === "closed") return "Closed at ETA";
-  if (settings.hoursMode === "requireOpen" && hours.status === "unknown") return "Hours unknown";
-  if (settings.hoursMode === "requireOpen" && hours.status === "opensSoon") return "Opens after ETA";
-
-  return "";
-}
-
-function prelimDetourScore(candidate, settings) {
-  const arrivalMinutes = estimatedArrivalMinutes(candidate, settings);
-  const rejected = rejectionReason(candidate, settings, arrivalMinutes);
-  if (rejected) return null;
-
-  const evidence = internetEvidenceScore(candidate);
-  const mealType = effectiveMealType(candidate, settings);
-  const mealFit = mealFitScore(candidate, mealType);
-  const hours = openingStatus(candidate, arrivalMinutes, settings);
-
-  let score = evidence * 7.2;
-  score += mealFit * 1.9;
-
-  if (candidate.estimatedAddedMinutes <= settings.maxAdded) {
-    score -= candidate.estimatedAddedMinutes * 0.25;
-    score += 4;
-  } else {
-    score -= settings.maxAdded * 0.25;
-    score -= (candidate.estimatedAddedMinutes - settings.maxAdded) * 1.6;
+  function scoreAddedTime(added, maxAdded) {
+    if (added <= maxAdded * 0.5) return 100;
+    if (added <= maxAdded) return 94;
+    if (added <= maxAdded + 5) return 82;
+    if (added <= maxAdded + 12) return 64;
+    if (added <= maxAdded + 25) return 42;
+    return 20;
   }
 
-  if (candidate.routeFitConfidence === "Low") score -= 7;
-  if (candidate.backtrackRisk === "Medium") score -= 5;
-  if (candidate.backtrackRisk === "High") score -= 14;
+  function scoreScarcity(candidate, allCandidates, settings) {
+    const routePosition = number(settings.routePosition, 0);
+    const windowEnd = routePosition + 8;
+    const betterSoon = allCandidates.filter(other => {
+      if (other.id === candidate.id) return false;
+      if (other.seq <= candidate.seq) return false;
+      if (other.seq > windowEnd) return false;
+      if (other.chain || other.backtracking || other.openAtArrival === false) return false;
+      return other.foodReputation >= candidate.foodReputation + 6;
+    });
 
-  if (settings.hoursMode === "warnOnly") {
-    if (hours.status === "closed") score -= 30;
-    if (hours.status === "opensSoon") score -= 10;
-    if (hours.status === "unknown") score -= 12;
+    if (betterSoon.length === 0) return 96;
+    if (betterSoon.length === 1) return 76;
+    return 58;
   }
 
-  if (candidate.candidateType === "Breakfast/Morning" && (candidate.destinationEvidence ?? 5) <= 5) {
-    score -= 3;
+  function tierForScore(score) {
+    return TIER_RULES.find(rule => score >= rule.min) || TIER_RULES[TIER_RULES.length - 1];
   }
 
-  if (settings.tripMode === "strict" && (candidate.destinationEvidence ?? 0) < 8) {
-    score -= 12;
+  function explainScore(c, s) {
+    const bullets = [];
+
+    if (!c.chain) bullets.push("Independent/local stop instead of a default chain.");
+    if (c.estimatedAddedMinutes <= s.maxAdded) {
+      bullets.push(`Only adds ${c.estimatedAddedMinutes} minutes to the trip.`);
+    } else {
+      bullets.push(`Adds ${c.estimatedAddedMinutes} minutes, but the food case may justify it.`);
+    }
+
+    if (s.restaurantQuality >= 90) bullets.push("Very strong food reputation for this route.");
+    else if (s.restaurantQuality >= 82) bullets.push("Strong food reputation with a clear reason to stop.");
+    else bullets.push("Solid available food choice for this stretch.");
+
+    if (s.scarcityFit >= 88) bullets.push("No clearly better option is coming up soon.");
+    if (c.famousFor) bullets.push(`Known for: ${c.famousFor}.`);
+
+    return {
+      restaurantQuality: s.restaurantQuality,
+      tripFit: s.tripFit,
+      timeFit: s.timeFit,
+      scarcityFit: s.scarcityFit,
+      detourScore: s.detourScore,
+      tier: s.tier.tier,
+      bullets
+    };
   }
 
-  if (settings.tripMode === "hungry") {
-    score += candidate.estimatedAddedMinutes <= 10 ? 8 : 0;
+  function number(value, fallback) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
   }
 
-  return Math.round(clamp(score, 0, 100));
-}
-
-function recommendationTier(candidate, settings) {
-  if (!candidate) return { label: "Keep Driving", className: "wait" };
-  if (candidate.score >= 92 && candidate.destinationEvidence >= 8) {
-    return { label: "Worth the Detour", className: "" };
+  function clamp(value, min = 0, max = 100) {
+    return Math.max(min, Math.min(max, Number(value)));
   }
-  if (candidate.autoMeal === "breakfast" && candidate.mealFit >= 8) {
-    return { label: "Best Breakfast Ahead", className: "practical" };
-  }
-  if (candidate.score >= 80) {
-    return { label: "Best Stop Ahead", className: "practical" };
-  }
-  return { label: "Best Available", className: "wait" };
-}
 
-function recommend(candidates, settings) {
-  const evaluated = candidates.map(c => {
-    const arrivalMinutes = estimatedArrivalMinutes(c, settings);
-    const score = prelimDetourScore(c, settings);
-    const evidence = Math.round(internetEvidenceScore(c) * 10) / 10;
-    const autoMeal = effectiveMealType(c, settings);
-    const arrivalClock = minutesToClock(arrivalMinutes);
-    const mealFit = mealFitScore(c, autoMeal);
-    const hours = openingStatus(c, arrivalMinutes, settings);
-    const status = score === null ? rejectionReason(c, settings, arrivalMinutes) : "Eligible";
-    return { ...c, score, evidence, mealFit, autoMeal, arrivalMinutes, arrivalClock, hours, status };
-  });
-
-  const eligible = evaluated
-    .filter(c => c.score !== null)
-    .sort((a, b) => b.score - a.score);
-
-  const pick = eligible[0] || null;
-
-  return {
-    pick,
-    tier: recommendationTier(pick, settings),
-    upcoming: eligible.slice(0, 6),
-    evaluated
+  window.DetourEatsEngine = {
+    recommend,
+    scoreCandidate,
+    normalizeCandidate
   };
-}
+
+  // Backward-compatible global expected by app.js
+  window.recommend = recommend;
+})();

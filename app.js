@@ -209,7 +209,7 @@ function getTripState(pick, result) {
     };
   }
 
-  if (pick.score >= 97) {
+  if (pick.tier === "Bucket List Stop" || pick.score >= 97) {
     return {
       key: "bucket-list",
       label: "Bucket List Stop",
@@ -219,7 +219,7 @@ function getTripState(pick, result) {
     };
   }
 
-  if (pick.score >= 92) {
+  if (pick.tier === "Worth the Detour" || pick.score >= 92) {
     return {
       key: "this-is-your-stop",
       label: "This Is Your Stop",
@@ -229,7 +229,7 @@ function getTripState(pick, result) {
     };
   }
 
-  if (pick.score >= 84) {
+  if (pick.tier === "Best Stop Ahead" || pick.score >= 84) {
     return {
       key: "found-something",
       label: "Found Something",
@@ -250,6 +250,7 @@ function getTripState(pick, result) {
 
 function getRecommendationTier(pick) {
   if (!pick) return "Keep Driving";
+  if (pick.tier) return pick.tier;
   if (pick.score >= 97) return "Bucket List Stop";
   if (pick.score >= 92) return "Worth the Detour";
   if (pick.score >= 84) return "Best Stop Ahead";
@@ -385,11 +386,24 @@ function renderDetailsPanel(pick, trip, copy) {
     return;
   }
 
+  const explanation = pick.scoreExplanation;
+  const scoreBreakdown = explanation ? `
+    <div class="score-breakdown">
+      <div><strong>${explanation.restaurantQuality}</strong><span>Food</span></div>
+      <div><strong>${explanation.tripFit}</strong><span>Trip Fit</span></div>
+      <div><strong>${explanation.timeFit}</strong><span>Time</span></div>
+      <div><strong>${explanation.scarcityFit}</strong><span>Scarcity</span></div>
+    </div>
+  ` : "";
+
+  const engineBullets = explanation?.bullets?.length ? explanation.bullets : rationale;
+
   els.detailsPanel.innerHTML = `
     <h2>Why this stop</h2>
     <p class="lead-copy">${escapeHtml(copy.lead)}</p>
+    ${scoreBreakdown}
     <ul class="details-list">
-      ${rationale.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
+      ${engineBullets.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
     </ul>
   `;
 }

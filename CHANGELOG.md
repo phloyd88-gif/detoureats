@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4
+- Added a dedicated Detour Score engine.
+- Added richer sample route data with food reputation, uniqueness, confidence, consistency, and destination-worthiness.
+- Added score explanation breakdown: Food, Trip Fit, Time, and Scarcity.
+- Added guardrails so convenience cannot make mediocre food look elite.
+- Improved Best Available logic so the app still makes a decision when the traveler needs to eat.
+
+
 ## v0.3.2
 - Replaced weak Best Available copy that implied the driver was still guessing.
 - Updated wording to reinforce that DetourEats makes the decision.
