@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.8.5 Short Route Fallback
+- Added a dedicated local restaurant search for trips shorter than approximately 40 miles.
+- Searches compact origin, midpoint, and destination areas.
+- Retries Overpass through multiple servers using POST and GET.
+- Added a bounded Nominatim fallback when Overpass is unavailable or sparse.
+- Restricts fallback results to the actual route corridor.
+- Preserves business-status, duplicate, matrix, and exact-route checks.
+- Added active provider details to Field Tester Mode.
+
+
+## v1.8.4 Search Reliability
+- Replaced broad route-tube searches with compact waypoint-circle queries.
+- Limits practical public-map requests to two points.
+- Reduced public-search concurrency to avoid self-throttling.
+- Reset restaurant discovery cache.
+- Treats partial searches with at least five qualified options as route-ready.
+- Hides raw route diagnostics during normal use.
+- Keeps full diagnostics in Field Tester Mode.
+
+
+## v1.8.3 Business Status Hotfix
+- Blocked the former Shaker Mill Tavern restaurant listing in West Stockbridge, Massachusetts.
+- Keeps Shaker Mill Inn separate as a lodging identity.
+- Added a dedicated place-status validation module.
+- Upgraded Overpass restaurant results to include element edit metadata.
+- Added explicit closed, removed, demolished, abandoned, and disused checks.
+- Added status freshness evaluation using check dates, survey dates, source dates, and map edit timestamps.
+- Suppresses restaurant records older than six years when no current operating signal is mapped.
+- Added high, medium, and low operational-confidence classifications.
+- Added conservative Detour Score caps for weakly verified current operation.
+- Prevents low-operational-confidence records from exceptional-detour alerts.
+- Added a Closed or Stale Listings Filtered route outcome and preview count.
+- Closed, wrong-location, and duplicate reports now hide a listing immediately and persistently on that device.
+- Includes local place suppressions in field-test JSON exports.
+
+
 ## v1.8.2 Route Pipeline Repair
 - Replaced whole-route Overpass queries with independently cached route-section searches.
 - Retains successful partial restaurant results when other sections fail.

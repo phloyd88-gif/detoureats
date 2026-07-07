@@ -2912,3 +2912,91 @@ button:disabled {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+
+/* v1.8.3 Business Status Hotfix */
+.pipeline-count-grid {
+  grid-template-columns: repeat(5, 1fr);
+}
+@media (max-width: 720px) {
+  .pipeline-count-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+
+/* v1.8.4 Search Reliability */
+.route-result-summary {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin: 11px 0;
+  padding: 12px;
+  border: 1px solid #bbf7d0;
+  border-radius: 13px;
+  background: #f0fdf4;
+}
+.route-result-summary > div {
+  flex: 0 0 auto;
+  min-width: 76px;
+}
+.route-result-summary span,
+.route-result-summary strong {
+  display: block;
+}
+.route-result-summary span {
+  color: #15803d;
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.route-result-summary strong {
+  margin-top: 2px;
+  color: #166534;
+  font-size: 24px;
+}
+.route-result-summary p {
+  margin: 0;
+  color: #166534;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.route-search-note {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border-radius: 11px;
+  background: #f8fafc;
+}
+.route-search-note span,
+.route-search-note strong {
+  display: block;
+}
+.route-search-note span {
+  color: #64748b;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+.route-search-note strong {
+  margin-top: 3px;
+  color: #334155;
+  font-size: 10px;
+}
+.route-diagnostic-details {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed #818cf8;
+  border-radius: 13px;
+  background: #eef2ff;
+}
+.route-diagnostic-details > strong {
+  color: #4338ca;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.rare-scan-note {
+  display: block;
+  margin-top: 8px;
+  color: #7e22ce;
+  font-size: 8px;
+  font-weight: 800;
+}

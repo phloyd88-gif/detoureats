@@ -1,4 +1,4 @@
-/* DetourEats v1.7 Exceptional Detour Scoring Engine
+/* DetourEats v1.8.3 Operationally Verified Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -131,6 +131,12 @@ It is restaurant quality filtered through trip fit.
       destinationEvidenceScore: number(c.destinationEvidenceScore, 0),
       destinationEvidenceLevel:
         c.destinationEvidenceLevel || "basic",
+      operationalStatus:
+        c.operationalStatus || "unverified",
+      operationalConfidence:
+        c.operationalConfidence || "unknown",
+      operationalReason:
+        c.operationalReason || "",
       exceptionalScan: Boolean(c.exceptionalScan),
       exceptionalOnly: Boolean(c.exceptionalOnly),
       backtracking: Boolean(c.backtracking),
@@ -215,6 +221,18 @@ It is restaurant quality filtered through trip fit.
         if (candidate.seq < routePosition) return false;
         if (candidate.backtracking) return false;
         if (candidate.openAtArrival === false) return false;
+        if (
+          ["closed", "stale-unverified"].includes(
+            candidate.operationalStatus
+          )
+        ) {
+          return false;
+        }
+        if (
+          candidate.operationalConfidence === "low"
+        ) {
+          return false;
+        }
         if (candidate.chain) return false;
 
         const added = number(
@@ -469,6 +487,22 @@ It is restaurant quality filtered through trip fit.
       }
 
       detourScore = Math.min(detourScore, discoveryCap);
+
+      if (
+        c.operationalConfidence === "low"
+      ) {
+        detourScore = Math.min(
+          detourScore,
+          76
+        );
+      } else if (
+        c.operationalConfidence === "medium"
+      ) {
+        detourScore = Math.min(
+          detourScore,
+          84
+        );
+      }
     }
 
     detourScore = Math.round(detourScore);
@@ -1097,6 +1131,19 @@ It is restaurant quality filtered through trip fit.
       c.discoverySource === "openstreetmap"
     ) {
       bullets.push("Route-discovered option with incomplete editorial quality data.");
+      if (
+        c.operationalConfidence === "low"
+      ) {
+        bullets.push(
+          "Current operation is weakly verified, so the recommendation score is capped."
+        );
+      } else if (
+        c.operationalConfidence === "medium"
+      ) {
+        bullets.push(
+          "Current operation has moderate map-based verification."
+        );
+      }
       if (c.routeOffsetMiles > 5) {
         bullets.push(
           `Adaptive search found it about ${c.routeOffsetMiles.toFixed(1)} miles from the route.`

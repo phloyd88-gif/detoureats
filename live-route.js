@@ -1,4 +1,4 @@
-/* DetourEats v1.8.2 Route Pipeline Repair
+/* DetourEats v1.8.5 Short Route Fallback
    No account or API token is required.
 
    Prototype services:
@@ -13,7 +13,7 @@
   "use strict";
 
   const GEOCODE_CACHE_KEY = "detoureats_geocode_cache_v2";
-  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v3";
+  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v4";
 
   const NOMINATIM_URL =
     "https://nominatim.openstreetmap.org/search";
@@ -32,26 +32,33 @@
   const TABLE_TIMEOUT_MS = 9000;
   const EXACT_ROUTE_TIMEOUT_MS = 7000;
 
-  const DISCOVERY_TOTAL_BUDGET_MS = 18000;
-  const PRACTICAL_CHUNK_TIMEOUT_MS = 7000;
-  const OPTIONAL_CHUNK_TIMEOUT_MS = 6000;
-  const DISCOVERY_CONCURRENCY = 3;
-  const OPTIONAL_DISCOVERY_CONCURRENCY = 2;
+  const DISCOVERY_TOTAL_BUDGET_MS = 28000;
+  const PRACTICAL_CHUNK_TIMEOUT_MS = 7500;
+  const OPTIONAL_CHUNK_TIMEOUT_MS = 6500;
+  const DISCOVERY_CONCURRENCY = 2;
+  const OPTIONAL_DISCOVERY_CONCURRENCY = 1;
 
   const EXACT_ROUTING_BUDGET_MS = 13000;
   const EXACT_ROUTING_CONCURRENCY = 3;
 
-  const PRACTICAL_RADIUS_METERS = 8000;
-  const EXTENDED_RADIUS_METERS = 24000;
-  const DESTINATION_RADIUS_METERS = 40000;
-  const EXCEPTIONAL_RADIUS_METERS = 40000;
-  const HUNGRY_FALLBACK_RADIUS_METERS = 12000;
+  const SHORT_ROUTE_THRESHOLD_METERS = 65000;
+  const SHORT_ROUTE_OVERPASS_BUDGET_MS = 18000;
+  const SHORT_ROUTE_NOMINATIM_TIMEOUT_MS = 8500;
+  const SHORT_ROUTE_SEARCH_RADIUS_METERS = 7500;
+  const NOMINATIM_FALLBACK_URL =
+    "https://nominatim.openstreetmap.org/search";
 
-  const PRACTICAL_CHUNK_LENGTH_METERS = 52000;
-  const EXTENDED_CHUNK_LENGTH_METERS = 105000;
-  const DESTINATION_CHUNK_LENGTH_METERS = 155000;
-  const PRACTICAL_POINT_SPACING_METERS = 5500;
-  const OPTIONAL_POINT_SPACING_METERS = 11000;
+  const PRACTICAL_RADIUS_METERS = 6000;
+  const EXTENDED_RADIUS_METERS = 18000;
+  const DESTINATION_RADIUS_METERS = 32000;
+  const EXCEPTIONAL_RADIUS_METERS = 32000;
+  const HUNGRY_FALLBACK_RADIUS_METERS = 9000;
+
+  const PRACTICAL_CHUNK_LENGTH_METERS = 70000;
+  const EXTENDED_CHUNK_LENGTH_METERS = 140000;
+  const DESTINATION_CHUNK_LENGTH_METERS = 210000;
+  const PRACTICAL_POINT_SPACING_METERS = 32000;
+  const OPTIONAL_POINT_SPACING_METERS = 70000;
 
   const ROUTE_BUCKET_COUNT = 20;
   const MAX_DISCOVERED_CANDIDATES = 36;
@@ -451,7 +458,10 @@
         completedChunks: 0,
         failedChunks: 0,
         cachedChunks: 0,
-        rawElements: 0
+        rawElements: 0,
+        statusExcluded: 0,
+        knownClosedExcluded: 0,
+        staleExcluded: 0
       }
     };
 
@@ -525,6 +535,11 @@
         discovery.plan,
       discoveryDiagnostics:
         discovery.diagnostics,
+      statusExcludedCount:
+        Number(
+          discovery.diagnostics?.statusExcluded ||
+          0
+        ),
       tripMode:
         String(tripMode || "balanced"),
       discoveredCount:
@@ -640,6 +655,11 @@
           discovery.plan;
         session.discoveryDiagnostics =
           discovery.diagnostics;
+        session.statusExcludedCount =
+          Number(
+            discovery.diagnostics?.statusExcluded ||
+            0
+          );
         session.discoveredCount =
           discovery.candidates.length;
         session.curatedCount =
@@ -737,7 +757,12 @@
         matrixStatus:
           routing.matrixStatus,
         qualifyingCount:
-          liveCandidates.length
+          liveCandidates.length,
+        statusExcluded:
+          Number(
+            session.statusExcludedCount ||
+            0
+          )
       });
 
     const plan =
@@ -805,6 +830,39 @@
         exactRoutingStatus:
           routing.exactRoutingStatus,
         searchOutcome,
+        shortRouteSearch:
+          Boolean(
+            session.discoveryDiagnostics
+              ?.shortRoute
+          ),
+        discoveryProvider:
+          session.discoveryDiagnostics
+            ?.providerLabel ||
+          session.discoveryPlan
+            ?.providerLabel ||
+          "OpenStreetMap",
+        shortRouteFallbackUsed:
+          Boolean(
+            session.discoveryDiagnostics
+              ?.fallbackSucceeded
+          ),
+        statusExcludedCount:
+          Number(
+            session.statusExcludedCount ||
+            0
+          ),
+        knownClosedExcludedCount:
+          Number(
+            session.discoveryDiagnostics
+              ?.knownClosedExcluded ||
+            0
+          ),
+        staleExcludedCount:
+          Number(
+            session.discoveryDiagnostics
+              ?.staleExcluded ||
+            0
+          ),
 
         discoveryChunksTotal:
           Number(
@@ -1321,7 +1379,14 @@
       Number(
         candidate.destinationEvidenceScore ||
         0
-      ) * 4 -
+      ) * 4 +
+      (
+        candidate.operationalConfidence === "high"
+          ? 18
+          : candidate.operationalConfidence === "medium"
+            ? 7
+            : -24
+      ) -
       added * 1.8 -
       Number(
         candidate.routeOffsetMiles || 0
@@ -1593,6 +1658,21 @@
 
     assertBuildActive(buildGeneration);
 
+    if (
+      Number(options.routeDistanceMeters || 0) <=
+      SHORT_ROUTE_THRESHOLD_METERS
+    ) {
+      return await discoverShortRouteRestaurants(
+        routeContext,
+        progressCallback,
+        {
+          style,
+          buildGeneration
+        }
+      );
+    }
+
+
     const practicalChunks =
       buildRouteChunks(
         routeContext,
@@ -1831,6 +1911,36 @@
           ),
         0
       );
+    const statusExcluded =
+      allDiagnostics.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.diagnostics.statusExcluded ||
+            0
+          ),
+        0
+      );
+    const knownClosedExcluded =
+      allDiagnostics.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.diagnostics.knownClosedExcluded ||
+            0
+          ),
+        0
+      );
+    const staleExcluded =
+      allDiagnostics.reduce(
+        (sum, item) =>
+          sum +
+          Number(
+            item.diagnostics.staleExcluded ||
+            0
+          ),
+        0
+      );
 
     let status = "complete";
     if (
@@ -1940,8 +2050,630 @@
         destinationElements:
           destination.diagnostics.rawElements,
         exceptionalElements:
-          exceptional.diagnostics.rawElements
+          exceptional.diagnostics.rawElements,
+        statusExcluded,
+        knownClosedExcluded,
+        staleExcluded
       }
+    };
+  }
+
+  async function discoverShortRouteRestaurants(
+    routeContext,
+    progressCallback,
+    {
+      style,
+      buildGeneration
+    }
+  ) {
+    assertBuildActive(buildGeneration);
+
+    const points = buildShortRouteSearchPoints(
+      routeContext
+    );
+
+    progressCallback?.(
+      "Searching nearby restaurants along the short route"
+    );
+
+    let overpassItems = [];
+    let overpassSucceeded = false;
+    let overpassRaw = 0;
+    let statusExcluded = 0;
+
+    try {
+      const query = buildOverpassChunkQuery(
+        points,
+        SHORT_ROUTE_SEARCH_RADIUS_METERS,
+        "all"
+      );
+
+      const result = await fetchShortRouteOverpass({
+        query,
+        timeoutMs:
+          SHORT_ROUTE_OVERPASS_BUDGET_MS
+      });
+
+      overpassSucceeded = true;
+      overpassRaw = result.elements.length;
+
+      for (const element of result.elements) {
+        const assessment =
+          window.DetourEatsPlaceStatus
+            ?.assessOsmElement?.(element) ||
+          {
+            blocked: false,
+            status: "unverified",
+            confidence: "low",
+            reason:
+              "Business status validation was unavailable.",
+            lastCheckedAt: "",
+            ageDays: 99999,
+            signalCount: 0
+          };
+
+        if (assessment.blocked) {
+          statusExcluded += 1;
+          continue;
+        }
+
+        const candidate = convertOsmElement(
+          element,
+          routeContext,
+          "practical",
+          assessment
+        );
+
+        if (candidate) {
+          overpassItems.push(candidate);
+        }
+      }
+    } catch (error) {
+      console.warn(
+        "Short-route OpenStreetMap search unavailable:",
+        error
+      );
+    }
+
+    assertBuildActive(buildGeneration);
+
+    let fallbackItems = [];
+    let fallbackSucceeded = false;
+
+    if (overpassItems.length < 5) {
+      progressCallback?.(
+        "Using a local restaurant fallback search"
+      );
+
+      try {
+        fallbackItems =
+          await discoverShortRouteWithNominatim(
+            routeContext,
+            buildGeneration
+          );
+        fallbackSucceeded = true;
+      } catch (error) {
+        console.warn(
+          "Short-route local fallback unavailable:",
+          error
+        );
+      }
+    }
+
+    const candidates =
+      selectDistributedDiscovered(
+        dedupeCandidates([
+          ...overpassItems,
+          ...fallbackItems
+        ])
+      );
+
+    let status = "complete";
+    if (
+      !overpassSucceeded &&
+      !fallbackSucceeded
+    ) {
+      status = "unavailable";
+    } else if (!candidates.length) {
+      status = "empty";
+    } else if (
+      !overpassSucceeded ||
+      fallbackSucceeded
+    ) {
+      status = "fallback";
+    }
+
+    const providerLabel =
+      overpassSucceeded && fallbackSucceeded
+        ? "OpenStreetMap plus local fallback"
+        : overpassSucceeded
+          ? "OpenStreetMap"
+          : fallbackSucceeded
+            ? "Bounded local fallback"
+            : "Unavailable";
+
+    return {
+      candidates,
+      plan: {
+        status,
+        style,
+        practicalUsed: true,
+        extendedUsed: false,
+        destinationUsed: false,
+        exceptionalSearchUsed: false,
+        practicalRadiusMiles:
+          metersToMiles(
+            SHORT_ROUTE_SEARCH_RADIUS_METERS
+          ),
+        extendedRadiusMiles: 0,
+        destinationRadiusMiles: 0,
+        exceptionalRadiusMiles: 0,
+        maximumRadiusMiles:
+          metersToMiles(
+            SHORT_ROUTE_SEARCH_RADIUS_METERS
+          ),
+        label:
+          status === "fallback"
+            ? "Short-route local search · fallback used"
+            : status === "unavailable"
+              ? "Short-route restaurant search unavailable"
+              : "Short-route local search",
+        summary:
+          status === "unavailable"
+            ? "Neither local restaurant provider responded."
+            : `${candidates.length} route-relevant local restaurant record${candidates.length === 1 ? "" : "s"} retained using ${providerLabel}.`,
+        shortRoute: true,
+        providerLabel
+      },
+      diagnostics: {
+        status,
+        totalChunks: 1,
+        completedChunks:
+          overpassSucceeded ||
+          fallbackSucceeded
+            ? 1
+            : 0,
+        failedChunks:
+          overpassSucceeded ||
+          fallbackSucceeded
+            ? 0
+            : 1,
+        cachedChunks: 0,
+        rawElements:
+          overpassRaw +
+          fallbackItems.length,
+        practicalElements:
+          candidates.length,
+        extendedElements: 0,
+        destinationElements: 0,
+        exceptionalElements: 0,
+        statusExcluded,
+        knownClosedExcluded: 0,
+        staleExcluded: 0,
+        shortRoute: true,
+        overpassSucceeded,
+        fallbackSucceeded,
+        providerLabel
+      }
+    };
+  }
+
+  function buildShortRouteSearchPoints(
+    routeContext
+  ) {
+    const total =
+      Number(
+        routeContext?.totalMeters || 0
+      );
+
+    const sampled = sampleRouteByDistance(
+      routeContext,
+      Math.max(6000, total / 3)
+    );
+
+    if (sampled.length <= 4) {
+      return sampled;
+    }
+
+    return [
+      sampled[0],
+      sampled[
+        Math.floor(
+          sampled.length / 2
+        )
+      ],
+      sampled[
+        sampled.length - 1
+      ]
+    ];
+  }
+
+  async function fetchShortRouteOverpass({
+    query,
+    timeoutMs
+  }) {
+    const deadline =
+      Date.now() +
+      Math.max(
+        1500,
+        Number(timeoutMs || 0)
+      );
+    let lastError = null;
+
+    for (
+      let attempt = 0;
+      attempt <
+      OVERPASS_URLS.length * 2;
+      attempt += 1
+    ) {
+      const remaining =
+        deadline - Date.now();
+
+      if (remaining < 900) break;
+
+      const endpoint =
+        OVERPASS_URLS[
+          attempt %
+          OVERPASS_URLS.length
+        ];
+      const useGet =
+        attempt >=
+        OVERPASS_URLS.length;
+
+      try {
+        let data;
+
+        if (useGet) {
+          const url =
+            `${endpoint}?data=${
+              encodeURIComponent(query)
+            }`;
+
+          if (url.length > 7800) {
+            continue;
+          }
+
+          data = await fetchJson(
+            url,
+            { method: "GET" },
+            remaining
+          );
+        } else {
+          data = await fetchJson(
+            endpoint,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/x-www-form-urlencoded;charset=UTF-8"
+              },
+              body:
+                new URLSearchParams({
+                  data: query
+                }).toString()
+            },
+            remaining
+          );
+        }
+
+        return {
+          elements:
+            Array.isArray(
+              data?.elements
+            )
+              ? data.elements
+              : []
+        };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw (
+      lastError ||
+      new Error(
+        "All public restaurant-search endpoints failed."
+      )
+    );
+  }
+
+  async function discoverShortRouteWithNominatim(
+    routeContext,
+    buildGeneration
+  ) {
+    assertBuildActive(buildGeneration);
+
+    const bounds = routeBoundsWithPadding(
+      routeContext,
+      0.07
+    );
+    const categories = [
+      "restaurant",
+      "cafe",
+      "fast food"
+    ];
+    const results = [];
+
+    for (const category of categories) {
+      assertBuildActive(buildGeneration);
+
+      const params = new URLSearchParams({
+        q: category,
+        format: "jsonv2",
+        countrycodes: "us",
+        bounded: "1",
+        viewbox:
+          `${bounds.west},${bounds.north},${bounds.east},${bounds.south}`,
+        limit: "35",
+        addressdetails: "1",
+        extratags: "1",
+        namedetails: "1"
+      });
+
+      const data = await fetchJson(
+        `${NOMINATIM_FALLBACK_URL}?${params.toString()}`,
+        {},
+        SHORT_ROUTE_NOMINATIM_TIMEOUT_MS
+      );
+
+      for (const item of data || []) {
+        const candidate =
+          convertNominatimRestaurant(
+            item,
+            routeContext,
+            category
+          );
+
+        if (candidate) {
+          results.push(candidate);
+        }
+      }
+
+      if (results.length >= 20) {
+        break;
+      }
+    }
+
+    return dedupeCandidates(results);
+  }
+
+  function convertNominatimRestaurant(
+    item,
+    routeContext,
+    category
+  ) {
+    const coordinates = [
+      Number(item?.lon),
+      Number(item?.lat)
+    ];
+
+    if (
+      coordinates.some(
+        value =>
+          !Number.isFinite(value)
+      )
+    ) {
+      return null;
+    }
+
+    const name = String(
+      item?.namedetails?.name ||
+      item?.name ||
+      item?.display_name
+        ?.split(",")[0] ||
+      ""
+    ).trim();
+
+    if (!name) return null;
+
+    const projection =
+      projectPointToRoute(
+        coordinates,
+        routeContext
+      );
+
+    if (
+      !projection ||
+      projection.distanceMeters >
+        SHORT_ROUTE_SEARCH_RADIUS_METERS
+    ) {
+      return null;
+    }
+
+    const amenity = String(
+      item?.extratags?.amenity ||
+      item?.type ||
+      category
+    ).toLowerCase();
+
+    if (
+      ![
+        "restaurant",
+        "cafe",
+        "fast_food",
+        "fast food"
+      ].some(value =>
+        amenity.includes(value)
+      )
+    ) {
+      return null;
+    }
+
+    const address = [
+      item?.address?.house_number,
+      item?.address?.road,
+      item?.address?.city ||
+        item?.address?.town ||
+        item?.address?.village,
+      item?.address?.state
+    ].filter(Boolean).join(", ");
+
+    const website =
+      item?.extratags?.website ||
+      item?.extratags?.["contact:website"] ||
+      "";
+    const phone =
+      item?.extratags?.phone ||
+      item?.extratags?.["contact:phone"] ||
+      "";
+    const openingHours =
+      item?.extratags?.opening_hours ||
+      "";
+
+    const signalCount = [
+      website,
+      phone,
+      openingHours
+    ].filter(Boolean).length;
+
+    return {
+      id:
+        `nominatim-${
+          item?.osm_type || "place"
+        }-${item?.osm_id || name}`,
+      name,
+      city:
+        item?.address?.city ||
+        item?.address?.town ||
+        item?.address?.village ||
+        "",
+      address,
+      coordinates,
+      category:
+        amenity.includes("cafe")
+          ? "Café"
+          : amenity.includes("fast")
+            ? "Fast food"
+            : "Restaurant",
+      cuisine:
+        item?.extratags?.cuisine ||
+        "",
+      chain: false,
+      independent: true,
+      regionalSpecialty: false,
+      localFavorite: false,
+      foodReputation: 66,
+      consistency: 62,
+      reviewConfidence: 36,
+      uniqueness: 56,
+      destinationWorthiness: 58,
+      tripFit: 74,
+      quickStop:
+        amenity.includes("fast"),
+      sitDown:
+        !amenity.includes("fast"),
+      familyFriendly: true,
+      priceLevel: 2,
+      publishedHours:
+        openingHours ||
+        "Not listed",
+      website,
+      phone,
+      wikipedia:
+        item?.extratags?.wikipedia ||
+        "",
+      wikidata:
+        item?.extratags?.wikidata ||
+        "",
+      description:
+        item?.extratags?.description ||
+        "",
+      sourceType:
+        "Bounded Nominatim local fallback",
+      discoverySource:
+        "nominatim",
+      provenance:
+        "route-discovered",
+      discoveryConfidence:
+        signalCount >= 2
+          ? "medium"
+          : "low",
+      destinationEvidenceScore:
+        signalCount >= 2
+          ? 3
+          : 1,
+      destinationEvidenceLevel:
+        signalCount >= 2
+          ? "moderate"
+          : "basic",
+      operationalStatus:
+        signalCount >= 2
+          ? "operational-signals-present"
+          : "unverified",
+      operationalConfidence:
+        signalCount >= 2
+          ? "medium"
+          : "low",
+      operationalReason:
+        signalCount >= 2
+          ? "Fallback listing includes multiple current operating signals."
+          : "Fallback listing has limited current operating data.",
+      operationalLastChecked: "",
+      operationalAgeDays: 99999,
+      operationalSignals:
+        signalCount,
+      routeOffsetMiles:
+        metersToMiles(
+          projection.distanceMeters
+        ),
+      routeProgress:
+        projection.progress,
+      routeBucket:
+        projection.bucket,
+      routeAlongMiles:
+        metersToMiles(
+          projection.alongMeters
+        ),
+      detourTier: "practical",
+      searchTier: "practical",
+      sourceUrl:
+        item?.osm_id
+          ? `https://www.openstreetmap.org/${
+              String(item.osm_type).toUpperCase() === "W"
+                ? "way"
+                : String(item.osm_type).toUpperCase() === "R"
+                  ? "relation"
+                  : "node"
+            }/${item.osm_id}`
+          : "",
+      operationalRisk:
+        "Discovered through the local fallback. Hours and food quality are not independently verified.",
+      discoveryRank:
+        70 -
+        metersToMiles(
+          projection.distanceMeters
+        ) * 1.5
+    };
+  }
+
+  function routeBoundsWithPadding(
+    routeContext,
+    paddingDegrees
+  ) {
+    const points =
+      routeContext?.geometry || [];
+    const longitudes =
+      points.map(point =>
+        Number(point[0])
+      );
+    const latitudes =
+      points.map(point =>
+        Number(point[1])
+      );
+
+    return {
+      west:
+        Math.min(...longitudes) -
+        paddingDegrees,
+      east:
+        Math.max(...longitudes) +
+        paddingDegrees,
+      south:
+        Math.min(...latitudes) -
+        paddingDegrees,
+      north:
+        Math.max(...latitudes) +
+        paddingDegrees
     };
   }
 
@@ -1969,6 +2701,9 @@
     let failedChunks = 0;
     let cachedChunks = 0;
     let rawElements = 0;
+    let statusExcluded = 0;
+    let knownClosedExcluded = 0;
+    let staleExcluded = 0;
 
     async function worker() {
       while (true) {
@@ -2021,11 +2756,43 @@
             const element of
             result.elements
           ) {
+            const statusAssessment =
+              window.DetourEatsPlaceStatus
+                ?.assessOsmElement?.(element) ||
+              {
+                blocked: false,
+                status: "unverified",
+                confidence: "low",
+                reason:
+                  "Business status validation was unavailable.",
+                lastCheckedAt: "",
+                ageDays: 99999,
+                signalCount: 0
+              };
+
+            if (statusAssessment.blocked) {
+              statusExcluded += 1;
+              if (
+                statusAssessment.reasonCode ===
+                "known-closed"
+              ) {
+                knownClosedExcluded += 1;
+              }
+              if (
+                statusAssessment.reasonCode ===
+                "stale-no-signals"
+              ) {
+                staleExcluded += 1;
+              }
+              continue;
+            }
+
             const candidate =
               convertOsmElement(
                 element,
                 routeContext,
-                searchTier
+                searchTier,
+                statusAssessment
               );
             if (!candidate) continue;
 
@@ -2097,7 +2864,10 @@
         completedChunks,
         failedChunks,
         cachedChunks,
-        rawElements
+        rawElements,
+        statusExcluded,
+        knownClosedExcluded,
+        staleExcluded
       }
     };
   }
@@ -2231,34 +3001,28 @@
     radiusMeters,
     evidenceMode
   ) {
-    const path = points
-      .map(point =>
-        `${Number(point[1]).toFixed(5)},${Number(point[0]).toFixed(5)}`
-      )
-      .join(",");
-
-    const selector =
-      `nwr(around:${Math.round(radiusMeters)},${path})` +
-      `["amenity"~"^(restaurant|fast_food|cafe)$"]` +
-      `["name"]`;
+    const selectors = points.map(point => {
+      const latitude = Number(point[1]).toFixed(5);
+      const longitude = Number(point[0]).toFixed(5);
+      return (
+        `nwr(around:${Math.round(radiusMeters)},${latitude},${longitude})` +
+        `["amenity"~"^(restaurant|fast_food|cafe)$"]` +
+        `["name"]`
+      );
+    });
 
     if (evidenceMode === "all") {
-      return `[out:json][timeout:25];
-${selector};
-out center tags;`;
+      return `[out:json][timeout:20];
+(
+${selectors.map(selector => `${selector};`).join("\n")}
+);
+out center tags meta;`;
     }
 
     const evidenceTags =
-      evidenceMode ===
-        "destination" ||
-      evidenceMode ===
-        "exceptional"
-        ? [
-            "wikidata",
-            "wikipedia",
-            "award",
-            "stars"
-          ]
+      evidenceMode === "destination" ||
+      evidenceMode === "exceptional"
+        ? ["wikidata", "wikipedia", "award", "stars"]
         : [
             "wikidata",
             "wikipedia",
@@ -2269,31 +3033,25 @@ out center tags;`;
             "stars"
           ];
 
-    const clauses =
-      evidenceTags.map(
-        tag =>
-          `${selector}["${tag}"];`
-      );
-
-    if (
-      evidenceMode ===
-        "destination" ||
-      evidenceMode ===
-        "exceptional"
-    ) {
-      clauses.push(
-        `${selector}["website"]["description"];`
-      );
-      clauses.push(
-        `${selector}["contact:website"]["description"];`
-      );
+    const clauses = [];
+    for (const selector of selectors) {
+      for (const tag of evidenceTags) {
+        clauses.push(`${selector}["${tag}"];`);
+      }
+      if (
+        evidenceMode === "destination" ||
+        evidenceMode === "exceptional"
+      ) {
+        clauses.push(`${selector}["website"]["description"];`);
+        clauses.push(`${selector}["contact:website"]["description"];`);
+      }
     }
 
-    return `[out:json][timeout:25];
+    return `[out:json][timeout:20];
 (
 ${clauses.join("\n")}
 );
-out center tags;`;
+out center tags meta;`;
   }
 
   function buildDiscoveryChunkCacheKey({
@@ -2310,7 +3068,7 @@ out center tags;`;
       ];
 
     return [
-      "chunk-v3",
+      "chunk-v4",
       searchTier,
       evidenceMode,
       Math.round(radiusMeters),
@@ -2381,52 +3139,24 @@ out center tags;`;
     destinationCount,
     exceptionalCount
   }) {
+    const surviving =
+      practicalCount +
+      extendedCount +
+      destinationCount +
+      exceptionalCount;
+
     if (status === "unavailable") {
-      return (
-        "The driving route is ready, but no restaurant-search section responded. " +
-        "This is a service failure, not a conclusion that the route has no restaurants."
-      );
+      return "The driving route is ready, but the public restaurant search did not respond.";
     }
-
     if (status === "empty") {
-      return (
-        `${completedChunks} route section${
-          completedChunks === 1
-            ? ""
-            : "s"
-        } completed, but OpenStreetMap returned no named restaurant, café, or fast-food records.`
-      );
+      return "Completed route searches returned no current named restaurant records.";
     }
-
-    const resultText =
-      `${rawElements} raw mapped place record${
-        rawElements === 1
-          ? ""
-          : "s"
-      } returned across ${completedChunks} completed route section${
-        completedChunks === 1
-          ? ""
-          : "s"
-      }.`;
-
-    const tierText =
-      ` ${practicalCount} practical, ${extendedCount} extended, ${destinationCount} destination, and ${exceptionalCount} exceptional candidate record${
-        practicalCount +
-          extendedCount +
-          destinationCount +
-          exceptionalCount ===
-        1
-          ? ""
-          : "s"
-      } survived evidence filtering.`;
-
     if (status === "partial") {
-      return (
-        `${resultText}${tierText} ${failedChunks} of ${totalChunks} section checks failed or timed out, so successful partial results were retained.`
-      );
+      return surviving > 0
+        ? `${surviving} route-relevant restaurant record${surviving === 1 ? "" : "s"} retained from successful search areas.`
+        : "Some route areas could not be searched and no usable restaurant record was retained.";
     }
-
-    return `${resultText}${tierText}`;
+    return `${surviving} route-relevant restaurant record${surviving === 1 ? "" : "s"} retained for route screening.`;
   }
 
   function determineSearchOutcome({
@@ -2434,7 +3164,8 @@ out center tags;`;
     discoveredRaw,
     candidatePool,
     matrixStatus,
-    qualifyingCount
+    qualifyingCount,
+    statusExcluded = 0
   }) {
     if (
       discoveryStatus ===
@@ -2453,6 +3184,13 @@ out center tags;`;
     }
 
     if (
+      candidatePool === 0 &&
+      statusExcluded > 0
+    ) {
+      return "restaurants_excluded_as_closed_or_stale";
+    }
+
+    if (
       candidatePool > 0 &&
       matrixStatus ===
         "unavailable" &&
@@ -2466,6 +3204,20 @@ out center tags;`;
       qualifyingCount === 0
     ) {
       return "restaurants_found_but_none_qualified";
+    }
+
+    if (
+      discoveryStatus === "fallback" &&
+      qualifyingCount > 0
+    ) {
+      return "restaurants_found_and_routed";
+    }
+
+    if (
+      discoveryStatus === "partial" &&
+      Number(qualifyingCount || 0) >= 5
+    ) {
+      return "restaurants_found_and_routed";
     }
 
     if (
@@ -2551,13 +3303,29 @@ out center tags;`;
   function convertOsmElement(
     element,
     routeContext,
-    searchTier = "practical"
+    searchTier = "practical",
+    statusAssessment = null
   ) {
     const tags = element?.tags || {};
     const name = String(tags.name || "").trim();
     if (!name) return null;
 
-    if (isClosedLifecycleFeature(tags)) {
+    const operational =
+      statusAssessment ||
+      window.DetourEatsPlaceStatus
+        ?.assessOsmElement?.(element) ||
+      {
+        blocked: false,
+        status: "unverified",
+        confidence: "low",
+        reason:
+          "Business status validation was unavailable.",
+        lastCheckedAt: "",
+        ageDays: 99999,
+        signalCount: 0
+      };
+
+    if (operational.blocked) {
       return null;
     }
 
@@ -2784,7 +3552,22 @@ out center tags;`;
         ? `OSM feature updated ${formatDate(element.timestamp)}`
         : "Discovered on current route",
       mappedTimestamp: element.timestamp || "",
+      operationalStatus:
+        operational.status,
+      operationalConfidence:
+        operational.confidence,
+      operationalReason:
+        operational.reason,
+      operationalLastChecked:
+        operational.lastCheckedAt || "",
+      operationalAgeDays:
+        operational.ageDays,
+      operationalSignals:
+        operational.signalCount,
       operationalRisk:
+        operational.confidence === "low"
+          ? `Current operation is weakly verified. ${operational.reason}`
+          :
         searchTier === "exceptional"
           ? `Rare-opportunity candidate ${routeOffsetMiles.toFixed(1)} miles from the route. Strong map evidence triggered the scan, but DetourEats has not independently verified bucket-list status, food quality, or arrival hours.`
           : detourTier === "practical"
@@ -2816,33 +3599,6 @@ out center tags;`;
     };
   }
 
-  function isClosedLifecycleFeature(tags) {
-    const closedValues = [
-      tags.disused,
-      tags.abandoned,
-      tags.demolished,
-      tags.removed,
-      tags.closed,
-      tags["disused:amenity"],
-      tags["abandoned:amenity"],
-      tags["demolished:amenity"]
-    ]
-      .map(value => String(value || "").toLowerCase())
-      .filter(Boolean);
-
-    if (
-      closedValues.some(value =>
-        ["yes", "true", "restaurant", "cafe", "fast_food"].includes(value)
-      )
-    ) {
-      return true;
-    }
-
-    const hours = String(tags.opening_hours || "").trim();
-    if (/^(closed|off)$/i.test(hours)) return true;
-
-    return false;
-  }
 
   function isStrictExceptionalDiscoveryCandidate(candidate) {
     return Boolean(
@@ -3408,83 +4164,31 @@ out center tags;`;
     targetLengthMeters,
     pointSpacingMeters
   ) {
-    const sampled =
-      sampleRouteByDistance(
-        routeContext,
-        pointSpacingMeters
-      );
+    const sampled = sampleRouteByDistance(
+      routeContext,
+      pointSpacingMeters
+    );
+    if (!sampled.length) return [];
 
-    if (sampled.length < 2) {
-      return [];
-    }
-
+    const pointsPerChunk =
+      pointSpacingMeters <= 40000 ? 2 : 1;
     const chunks = [];
-    let current = [sampled[0]];
-    let currentLength = 0;
 
     for (
-      let index = 1;
+      let index = 0;
       index < sampled.length;
-      index += 1
+      index += pointsPerChunk
     ) {
-      const previous =
-        sampled[index - 1];
-      const point =
-        sampled[index];
-      const segment =
-        distanceMeters(
-          previous,
-          point
-        );
+      const points = sampled.slice(
+        index,
+        index + pointsPerChunk
+      );
+      if (!points.length) continue;
 
-      current.push(point);
-      currentLength += segment;
-
-      if (
-        currentLength >=
-          targetLengthMeters &&
-        current.length >= 3
-      ) {
-        chunks.push({
-          index:
-            chunks.length,
-          points:
-            reduceChunkPoints(
-              current,
-              18
-            )
-        });
-        current = [point];
-        currentLength = 0;
-      }
-    }
-
-    if (current.length === 1) {
-      const lastChunk =
-        chunks[
-          chunks.length - 1
-        ];
-      if (lastChunk) {
-        lastChunk.points.push(
-          current[0]
-        );
-        lastChunk.points =
-          reduceChunkPoints(
-            lastChunk.points,
-            18
-          );
-      }
-    } else if (
-      current.length >= 2
-    ) {
       chunks.push({
-        index:
-          chunks.length,
-        points:
-          reduceChunkPoints(
-            current,
-            18
-          )
+        index: chunks.length,
+        points,
+        targetLengthMeters
       });
     }
 

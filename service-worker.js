@@ -1,10 +1,11 @@
-const CACHE_NAME = "detoureats-v1-8-2-route-repair";
+const CACHE_NAME = "detoureats-v1-8-5-short-route-fallback";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./data.js",
   "./engine.js",
+  "./place-status.js",
   "./live-route.js",
   "./address-search.js",
   "./restaurant-intelligence.js",

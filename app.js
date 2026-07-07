@@ -1,4 +1,4 @@
-/* DetourEats v1.8.2 Route Pipeline Repair
+/* DetourEats v1.8.5 Short Route Fallback
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -958,6 +958,10 @@ function renderRestaurantIntelligenceDetails(pick) {
           <strong>${escapeHtml(intel.hours.label)}</strong>
         </div>
         <div>
+          <span>Business status</span>
+          <strong>${escapeHtml(intel.operationalStatus)} · ${escapeHtml(intel.operationalConfidence)} confidence</strong>
+        </div>
+        <div>
           <span>Live review feeds</span>
           <strong>Not connected in this beta</strong>
         </div>
@@ -1142,7 +1146,7 @@ function savePlaceIssueReport() {
     return;
   }
 
-  intelligence.recordIssue({
+  const issue = intelligence.recordIssue({
     restaurant: {
       id: pick.id,
       name: pick.name,
@@ -1169,10 +1173,24 @@ function savePlaceIssueReport() {
   });
 
   closePlaceIssueReport();
-  showToast(
-    "Place report saved",
-    "The report is included in Field Tester exports."
-  );
+
+  if (
+    ["closed", "location", "duplicate"].includes(
+      issue.issueType
+    )
+  ) {
+    showToast(
+      "Place hidden",
+      `${pick.name} was removed from recommendations on this device.`
+    );
+    render();
+  } else {
+    showToast(
+      "Place report saved",
+      "The report is included in Field Tester exports."
+    );
+  }
+
   renderFieldTestPanel(
     state.currentResult,
     state.currentPick
@@ -1896,6 +1914,14 @@ function getSearchOutcomeCopy(
       className:
         "pipeline-empty"
     },
+    restaurants_excluded_as_closed_or_stale: {
+      label:
+        "Closed or stale listings filtered",
+      detail:
+        "Mapped restaurant records were returned, but business-status checks excluded them before routing.",
+      className:
+        "pipeline-partial"
+    },
     restaurants_found_route_checks_failed: {
       label:
         "Restaurants found; timing unavailable",
@@ -1914,9 +1940,9 @@ function getSearchOutcomeCopy(
     },
     partial_results_available: {
       label:
-        "Partial results available",
+        "Route ready with limited coverage",
       detail:
-        "Some route sections timed out, but successful restaurant and routing results were retained.",
+        "Usable restaurants were found, although some route areas could not be searched.",
       className:
         "pipeline-partial"
     },
@@ -2046,6 +2072,11 @@ function renderRoutePreview(
       metrics.discoveryChunksFailed ||
       0
     );
+  const statusFiltered =
+    Number(
+      metrics.statusExcludedCount ||
+      0
+    );
 
   els.routePreviewCard.innerHTML = `
     <div class="route-preview-ready">
@@ -2074,43 +2105,58 @@ function renderRoutePreview(
         <p>${escapeHtml(outcome.detail)}</p>
       </section>
 
-      <div class="pipeline-count-grid">
+      <div class="route-result-summary">
         <div>
-          <span>Mapped records</span>
-          <strong>${raw}</strong>
+          <span>Route options</span>
+          <strong>${total}</strong>
         </div>
-        <div>
-          <span>Route screened</span>
-          <strong>${screened}</strong>
-        </div>
-        <div>
-          <span>Exact timing</span>
-          <strong>${exact}</strong>
-        </div>
-        <div>
-          <span>Matrix estimates</span>
-          <strong>${estimated}</strong>
-        </div>
+        <p>
+          ${total > 0
+            ? `${total} route-relevant food option${total === 1 ? "" : "s"} are ready for evaluation.`
+            : escapeHtml(outcome.detail)}
+        </p>
       </div>
 
-      <p>
-        ${discovered} route-discovered · ${curated} curated ·
-        ${chunkCompleted}/${chunkTotal || chunkCompleted} search sections completed
-        ${chunkFailed ? ` · ${chunkFailed} section${chunkFailed === 1 ? "" : "s"} unavailable` : ""}
-      </p>
+      ${state.testerMode ? `
+        <section class="route-diagnostic-details">
+          <strong>Field-test diagnostics</strong>
+          <div class="pipeline-count-grid">
+            <div><span>Mapped records</span><strong>${raw}</strong></div>
+            <div><span>Route screened</span><strong>${screened}</strong></div>
+            <div><span>Exact timing</span><strong>${exact}</strong></div>
+            <div><span>Matrix estimates</span><strong>${estimated}</strong></div>
+            <div><span>Status filtered</span><strong>${statusFiltered}</strong></div>
+          </div>
+          <p>
+            Provider: ${escapeHtml(metrics.discoveryProvider || "OpenStreetMap")} ·
+            ${discovered} route-discovered · ${curated} curated ·
+            ${chunkCompleted}/${chunkTotal || chunkCompleted} search sections completed
+            ${chunkFailed ? ` · ${chunkFailed} section${chunkFailed === 1 ? "" : "s"} unavailable` : ""}
+          </p>
+          <div class="adaptive-search-summary">
+            <strong>${escapeHtml(metrics.searchMode || "Compact route search")}</strong>
+            <span>${escapeHtml(metrics.searchSummary || "Restaurant discovery was checked in compact route areas.")}</span>
+          </div>
+        </section>
+      ` : `
+        <div class="route-search-note">
+          <span>Restaurant search</span>
+          <strong>
+            ${metrics.shortRouteFallbackUsed && total > 0
+              ? "Nearby options found using the local fallback search."
+              : chunkFailed > 0 && total > 0
+                ? "Usable options found. Additional route areas may update on recheck."
+                : "Route search complete."}
+          </strong>
+        </div>
+      `}
 
-      <div class="adaptive-search-summary">
-        <strong>${escapeHtml(metrics.searchMode || "Segmented route search")}</strong>
-        <span>${escapeHtml(metrics.searchSummary || "Restaurant discovery was checked in smaller route sections.")}</span>
-        ${metrics.exceptionalSearchUsed &&
-          els.exceptionalAlertsInput?.checked !== false ? `
-          <small>
-            Rare-place override: strict scan attempted up to approximately
-            ${Number(metrics.exceptionalRadiusMiles || 25).toFixed(0)} miles,
-            regardless of Eating Priority.
-          </small>
-        ` : ""}
-      </div>
+      ${metrics.exceptionalSearchUsed &&
+        els.exceptionalAlertsInput?.checked !== false ? `
+        <small class="rare-scan-note">
+          Rare-place scan remains active regardless of Eating Priority.
+        </small>
+      ` : ""}
     </div>
   `;
 }

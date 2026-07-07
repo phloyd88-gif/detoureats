@@ -1,4 +1,4 @@
-# DetourEats App v1.8.2 Route Pipeline Repair
+# DetourEats App v1.8.5 Short Route Fallback
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -726,3 +726,62 @@ The interface distinguishes:
 All remaining demo controls were removed. The global curated restaurant list is
 only used as a source pool for route-relevance filtering and can never appear as
 a standalone fallback route.
+
+
+## v1.8.3: Business Status Validation
+
+### Shaker Mill Tavern correction
+
+The former Shaker Mill Tavern restaurant listing in West Stockbridge,
+Massachusetts is blocked by a confirmed status override. Shaker Mill Inn remains
+a separate lodging identity and is not treated as the same business.
+
+### Current-operation validation
+
+OpenStreetMap queries now request edit timestamps and metadata. Before a mapped
+restaurant can reach route screening, DetourEats checks:
+
+- explicit closed, removed, demolished, abandoned, and disused tags
+- confirmed status corrections
+- local tester reports
+- `check_date`, opening-hours check date, survey date, source date, and map edit date
+- mapped hours, phone, website, and social contact signals
+
+Records more than six years old with no current operating signal are suppressed.
+
+### Operational confidence
+
+Allowed route-discovered restaurants receive high, medium, or low operational
+confidence. Low-confidence records cannot trigger exceptional-place alerts and
+their Detour Score is capped below the normal automatic-alert threshold.
+Medium-confidence records receive a conservative score ceiling.
+
+### Persistent local corrections
+
+A tester report of Closed, Wrong Location, or Duplicate now hides the listing
+immediately on that device. Local suppressions are included in JSON field-test
+exports and applied to future routes.
+
+
+## v1.8.4: Search Reliability and Cleaner Driver Status
+
+Restaurant discovery now uses compact waypoint circles rather than broad
+around-polyline route tubes. Practical points are spaced roughly 20 miles
+apart, and no practical public-map request contains more than two points.
+Concurrency is lower to reduce throttling.
+
+Normal drivers see a simple route-ready summary. Raw mapped records, failed
+sections, exact routes, and matrix estimates appear only in Field Tester Mode.
+A partial search with at least five qualified options is treated as route-ready.
+
+
+## v1.8.5: Short Route Restaurant Fallback
+
+Trips shorter than approximately 40 miles now use a dedicated local restaurant
+search rather than the long-route segmented workflow.
+
+The short-route search checks compact origin, midpoint, and destination areas,
+retries Overpass through multiple servers using POST and GET, and uses a bounded
+Nominatim fallback when Overpass is unavailable or sparse. Fallback results are
+restricted to the actual route corridor and still pass business-status,
+duplicate, matrix, and exact-detour validation.

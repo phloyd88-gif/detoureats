@@ -1,4 +1,4 @@
-/* DetourEats v1.8 Beta restaurant intelligence
+/* DetourEats v1.8.5 restaurant intelligence
    This module uses only information already available to the prototype:
    curated restaurant records, OpenStreetMap metadata, route calculations,
    user feedback, and field-test reports.
@@ -79,6 +79,10 @@
 
   function enrichCandidates(candidates, context = {}) {
     const enriched = (Array.isArray(candidates) ? candidates : [])
+      .filter(candidate =>
+        !window.DetourEatsPlaceStatus
+          ?.getSuppressionForCandidate?.(candidate)
+      )
       .map(candidate => enrichCandidate(candidate, context))
       .filter(Boolean);
 
@@ -109,6 +113,15 @@
       dataGaps: gaps,
       hours,
       sourceSummary: buildSourceSummary(candidate, level),
+      operationalStatus:
+        candidate.operationalStatus ||
+        "unverified",
+      operationalConfidence:
+        candidate.operationalConfidence ||
+        "unknown",
+      operationalReason:
+        candidate.operationalReason ||
+        "Current operation has not been independently confirmed.",
       liveReviewStatus:
         "No licensed live review feed connected",
       providerStatus: getProviderStatus(),
@@ -283,6 +296,15 @@
       );
     }
 
+    if (
+      candidate.operationalConfidence === "low"
+    ) {
+      gaps.push(
+        candidate.operationalReason ||
+        "Current business operation is weakly verified."
+      );
+    }
+
     if (hours.status === "unknown") {
       gaps.push("Arrival-time hours are not verified.");
     } else if (hours.status === "schedule-likely") {
@@ -338,6 +360,15 @@
     if (candidate.openAtArrival === false) score -= 10;
     if (candidate.backtracking) score -= 12;
     if (
+      candidate.operationalConfidence === "low"
+    ) {
+      score -= 14;
+    } else if (
+      candidate.operationalConfidence === "medium"
+    ) {
+      score -= 4;
+    }
+    if (
       candidate.routeCalculationMethod === "matrix"
     ) {
       score -= 3;
@@ -388,7 +419,9 @@
     }
 
     return [
-      "OpenStreetMap route discovery",
+      candidate.discoverySource === "nominatim"
+        ? "Bounded local fallback discovery"
+        : "OpenStreetMap route discovery",
       candidate.website ? "website mapped" : "",
       candidate.destinationEvidenceLevel
         ? `${candidate.destinationEvidenceLevel} destination evidence`
@@ -867,6 +900,20 @@
     const issues = getIssues();
     issues.unshift(issue);
     saveIssues(issues.slice(0, MAX_ISSUES));
+
+    if (
+      ["closed", "location", "duplicate"].includes(
+        issue.issueType
+      )
+    ) {
+      window.DetourEatsPlaceStatus
+        ?.suppressCandidate?.(
+          issue.restaurant,
+          issue.issueType,
+          issue.notes
+        );
+    }
+
     return issue;
   }
 
@@ -884,6 +931,10 @@
     return {
       snapshots: snapshots.length,
       issues: issues.length,
+      suppressions:
+        window.DetourEatsPlaceStatus
+          ?.getSuppressions?.().length ||
+        0,
       uniqueRoutes: uniqueRoutes.size,
       latestSnapshot: snapshots[0] || null,
       providers: getProviderStatus()
@@ -896,7 +947,11 @@
       appVersion: VERSION,
       providerStatus: getProviderStatus(),
       snapshots: getSnapshots(),
-      issues: getIssues()
+      issues: getIssues(),
+      localSuppressions:
+        window.DetourEatsPlaceStatus
+          ?.getSuppressions?.() ||
+        []
     };
   }
 
