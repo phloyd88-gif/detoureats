@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.2 Beta
+- Added restaurant discovery across any live route using OpenStreetMap and Overpass.
+- Added route-corridor sampling and geographically distributed discovery candidates.
+- Combined discovered venues with relevant curated recommendations.
+- Added common-chain identification and available cuisine, address, website, phone, and hours metadata.
+- Added Curated and Route-discovered provenance labels throughout the app.
+- Added conservative discovery-confidence scoring caps so incomplete data cannot produce elite Detour Scores.
+- Added unknown-hours treatment and explicit unverified-hours messaging.
+- Added discovery counts and fallback status to Driver Mode and the trip timeline.
+
+
 ## v1.1 Beta
 - Made Detour Score a prominent main-card visual.
 - Added plain-English score meaning and comparison with the next option.

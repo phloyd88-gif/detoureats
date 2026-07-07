@@ -1,4 +1,4 @@
-# DetourEats App v1.1 Beta
+# DetourEats App v1.2 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -323,3 +323,39 @@ Added:
 - Recheck Route button during live-location trips
 
 The full six-factor score breakdown remains available under Tell Me Why.
+
+
+## v1.2 Beta: Restaurants for Any Route
+
+When live location is active, DetourEats now searches the driving corridor for
+OpenStreetMap food venues rather than relying only on the Amsterdam-to-Myrtle
+Beach curated database.
+
+### New route-discovery behavior
+
+- Samples food zones across the current route
+- Searches for restaurants, fast-food venues, and cafes near those zones
+- Distributes candidates across the trip instead of concentrating near one city
+- Combines route-discovered options with curated DetourEats recommendations
+- Removes duplicates and restaurants that create excessive backtracking
+- Uses actual route-through-restaurant calculations before recommending a stop
+- Identifies common chains from available brand/name metadata
+- Captures cuisine, address, website, phone, published hours, and source links when available
+- Caches discovery results for six hours to reduce public-service load
+
+### Trust and scoring guardrails
+
+Every recommendation is labeled:
+
+- **Curated**: reviewed for the DetourEats test database
+- **Route-discovered**: found automatically from OpenStreetMap along the current route
+
+Route-discovered options use conservative quality estimates and cannot receive
+an elite Detour Score. Medium-confidence discovery options are capped at 86;
+lower-confidence options are capped at 81. Hours are shown as unverified unless
+they have been independently evaluated against arrival time.
+
+### Fallback
+
+If route discovery is unavailable, live routing continues with relevant curated
+stops. If live routing also fails, the full curated demo remains available.

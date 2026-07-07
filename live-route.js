@@ -1,56 +1,79 @@
-/* DetourEats v1.0 Beta live route module
+/* DetourEats v1.2 Beta live route and discovery module
    No account or API token is required.
 
    Prototype services:
    - OpenStreetMap Nominatim public geocoder
    - Project OSRM public routing server
+   - Overpass API for restaurants along the route
 
-   This is intentionally low-volume, cached, and sequential for geocoding.
-   It is suitable for prototype testing, not a production traffic SLA.
+   Public services are queried conservatively and the app always retains
+   its curated demo fallback.
 */
 (function () {
   "use strict";
 
-  const GEOCODE_CACHE_KEY = "detoureats_geocode_cache_v1";
+  const GEOCODE_CACHE_KEY = "detoureats_geocode_cache_v2";
+  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v1";
   const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
   const OSRM_URL = "https://router.project-osrm.org/route/v1/driving";
+  const OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter"
+  ];
   const GEOCODE_DELAY_MS = 1100;
+  const DISCOVERY_RADIUS_METERS = 5000;
+  const MAX_ROUTE_SAMPLES = 14;
+  const MAX_DISCOVERED_CANDIDATES = 20;
+  const MAX_ROUTED_CANDIDATES = 24;
 
-  function loadCache() {
+  const KNOWN_CHAINS = [
+    "mcdonald", "burger king", "wendy", "taco bell", "kfc",
+    "subway", "starbucks", "dunkin", "chipotle", "panera",
+    "chick-fil-a", "popeyes", "arby", "sonic", "domino",
+    "pizza hut", "little caesars", "five guys", "cracker barrel",
+    "denny", "ihop", "applebee", "chili", "olive garden",
+    "outback", "longhorn", "texas roadhouse", "buffalo wild wings"
+  ];
+
+  function loadJsonStorage(key) {
     try {
-      return JSON.parse(localStorage.getItem(GEOCODE_CACHE_KEY) || "{}");
+      return JSON.parse(localStorage.getItem(key) || "{}");
     } catch {
       return {};
     }
   }
 
-  function saveCache(cache) {
+  function saveJsonStorage(key, value) {
     try {
-      localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(cache));
+      localStorage.setItem(key, JSON.stringify(value));
     } catch {
-      // Location routing still works with embedded fallback coordinates.
+      // Prototype continues without browser caching.
     }
   }
 
-  async function fetchJson(url, timeoutMs = 22000) {
+  async function fetchJson(url, options = {}, timeoutMs = 26000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(url, {
+        ...options,
         signal: controller.signal,
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          ...(options.headers || {})
+        },
         cache: "no-store"
       });
 
       if (!response.ok) {
-        throw new Error(`Route service returned ${response.status}.`);
+        throw new Error(`Service returned ${response.status}.`);
       }
 
       return await response.json();
     } catch (error) {
       if (error?.name === "AbortError") {
-        throw new Error("The route calculation timed out.");
+        throw new Error("The request timed out.");
       }
       throw error;
     } finally {
@@ -60,7 +83,7 @@
 
   async function geocode(query, fallbackCoordinates = null) {
     const key = String(query || "").trim().toLowerCase();
-    const cache = loadCache();
+    const cache = loadJsonStorage(GEOCODE_CACHE_KEY);
 
     if (Array.isArray(cache[key]) && cache[key].length === 2) {
       return { coordinates: cache[key], precision: "address cache" };
@@ -71,8 +94,7 @@
       format: "jsonv2",
       limit: "1",
       countrycodes: "us",
-      addressdetails: "0",
-      email: "phloyd88@gmail.com"
+      addressdetails: "0"
     });
 
     try {
@@ -82,7 +104,7 @@
       if (first?.lon && first?.lat) {
         const coordinates = [Number(first.lon), Number(first.lat)];
         cache[key] = coordinates;
-        saveCache(cache);
+        saveJsonStorage(GEOCODE_CACHE_KEY, cache);
         return { coordinates, precision: "address geocode" };
       }
     } catch (error) {
@@ -99,7 +121,7 @@
     throw new Error(`Could not locate ${query}.`);
   }
 
-  async function route(coordinates, steps = false) {
+  async function route(coordinates, options = {}) {
     if (!Array.isArray(coordinates) || coordinates.length < 2) {
       throw new Error("At least two route points are required.");
     }
@@ -108,10 +130,11 @@
       .map(pair => `${Number(pair[0]).toFixed(6)},${Number(pair[1]).toFixed(6)}`)
       .join(";");
 
+    const includeGeometry = Boolean(options.geometry);
     const params = new URLSearchParams({
       alternatives: "false",
-      steps: steps ? "true" : "false",
-      overview: "false",
+      steps: options.steps ? "true" : "false",
+      overview: includeGeometry ? "full" : "false",
       geometries: "geojson"
     });
 
@@ -124,13 +147,13 @@
     return result;
   }
 
-  async function prepareCandidates(candidates, progressCallback) {
+  async function prepareCuratedCandidates(candidates, progressCallback) {
     const prepared = [];
 
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
       progressCallback?.(
-        `Locating restaurants ${index + 1} of ${candidates.length}`
+        `Locating curated stops ${index + 1} of ${candidates.length}`
       );
 
       const result = await geocode(
@@ -141,7 +164,9 @@
       prepared.push({
         ...candidate,
         coordinates: result.coordinates,
-        coordinatePrecision: result.precision
+        coordinatePrecision: result.precision,
+        provenance: "curated",
+        discoverySource: null
       });
 
       if (index < candidates.length - 1) {
@@ -168,23 +193,56 @@
         : null;
 
     const destination = await geocode(destinationText, destinationFallback);
-    const preparedCandidates = await prepareCandidates(
-      candidates,
-      progressCallback
-    );
 
     progressCallback?.("Calculating main route");
     const baseline = await route(
       [originCoordinates, destination.coordinates],
-      true
+      { steps: true, geometry: true }
+    );
+
+    const routeCoordinates =
+      baseline?.geometry?.coordinates ||
+      [originCoordinates, destination.coordinates];
+
+    const routeSamples = sampleRoute(routeCoordinates);
+
+    progressCallback?.("Finding restaurants along the route");
+    let discoveredCandidates = [];
+    let discoveryStatus = "available";
+
+    try {
+      discoveredCandidates = await discoverRestaurants(
+        routeSamples,
+        progressCallback
+      );
+    } catch (error) {
+      console.warn("Restaurant discovery unavailable:", error);
+      discoveryStatus = "unavailable";
+    }
+
+    const preparedCurated = await prepareCuratedCandidates(
+      candidates,
+      progressCallback
+    );
+
+    const relevantCurated = preparedCurated.filter(candidate =>
+      distanceToSamples(candidate.coordinates, routeSamples) <= 35000
+    );
+
+    const mergedCandidates = selectCandidatesForRouting(
+      mergeCandidates(relevantCurated, discoveredCandidates),
+      routeSamples
     );
 
     const session = {
       destinationText,
       destinationCoordinates: destination.coordinates,
-      candidates: preparedCandidates,
+      candidates: mergedCandidates,
       initialDurationSeconds: Number(baseline.duration || 0),
       initialDistanceMeters: Number(baseline.distance || 0),
+      discoveryStatus,
+      discoveredCount: discoveredCandidates.length,
+      curatedCount: relevantCurated.length,
       createdAt: Date.now()
     };
 
@@ -192,7 +250,8 @@
       session,
       originCoordinates,
       maxAddedMinutes,
-      progressCallback
+      progressCallback,
+      baselineRoute: baseline
     });
 
     return { session, snapshot };
@@ -202,13 +261,14 @@
     session,
     originCoordinates,
     maxAddedMinutes,
-    progressCallback
+    progressCallback,
+    baselineRoute = null
   }) {
     progressCallback?.("Updating route");
 
-    const baseline = await route(
+    const baseline = baselineRoute || await route(
       [originCoordinates, session.destinationCoordinates],
-      true
+      { steps: true, geometry: false }
     );
 
     const maximumDetour = Math.max(Number(maxAddedMinutes || 10) + 25, 35);
@@ -227,7 +287,7 @@
             candidate.coordinates,
             session.destinationCoordinates
           ],
-          true
+          { steps: true, geometry: false }
         );
 
         const firstLeg = via.legs?.[0];
@@ -245,8 +305,6 @@
         );
         const milesAhead = metersToMiles(Number(firstLeg.distance || 0));
 
-        // A stop behind the driver produces a large via-route penalty.
-        // Exclude it, along with extreme out-of-corridor detours.
         if (addedMinutes > maximumDetour) continue;
         if (
           Number(firstLeg.duration || 0) >
@@ -314,6 +372,13 @@
       1
     );
 
+    const routedDiscovered = liveCandidates.filter(
+      candidate => candidate.provenance === "route-discovered"
+    ).length;
+    const routedCurated = liveCandidates.filter(
+      candidate => candidate.provenance !== "route-discovered"
+    ).length;
+
     return {
       candidates: liveCandidates,
       originCoordinates,
@@ -324,9 +389,357 @@
         ),
         remainingMinutes: Math.round(remainingDuration / 60),
         remainingMiles: metersToMiles(remainingDistance),
+        discoveredCount: routedDiscovered,
+        curatedCount: routedCurated,
+        discoveryStatus: session.discoveryStatus,
         updatedAt: Date.now()
       }
     };
+  }
+
+  async function discoverRestaurants(routeSamples, progressCallback) {
+    const cacheKey = routeSamples
+      .map(point => `${point[1].toFixed(2)},${point[0].toFixed(2)}`)
+      .join("|");
+    const cache = loadJsonStorage(DISCOVERY_CACHE_KEY);
+    const cached = cache[cacheKey];
+
+    if (
+      cached &&
+      Array.isArray(cached.items) &&
+      Date.now() - Number(cached.savedAt || 0) < 6 * 60 * 60 * 1000
+    ) {
+      return cached.items;
+    }
+
+    const query = buildOverpassQuery(routeSamples);
+    let data = null;
+    let lastError = null;
+
+    for (const endpoint of OVERPASS_URLS) {
+      try {
+        progressCallback?.("Searching route food zones");
+        const body = new URLSearchParams({ data: query }).toString();
+        data = await fetchJson(
+          endpoint,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+            },
+            body
+          },
+          45000
+        );
+        break;
+      } catch (error) {
+        lastError = error;
+        console.warn("Overpass endpoint failed:", endpoint, error);
+      }
+    }
+
+    if (!data) {
+      throw lastError || new Error("Restaurant discovery failed.");
+    }
+
+    const converted = (data.elements || [])
+      .map(element => convertOsmElement(element, routeSamples))
+      .filter(Boolean);
+
+    const selected = selectDistributedDiscovered(converted, routeSamples);
+    cache[cacheKey] = {
+      savedAt: Date.now(),
+      items: selected
+    };
+    saveJsonStorage(DISCOVERY_CACHE_KEY, cache);
+
+    return selected;
+  }
+
+  function buildOverpassQuery(samples) {
+    const clauses = samples.map(point => {
+      const lat = Number(point[1]).toFixed(6);
+      const lon = Number(point[0]).toFixed(6);
+      return `nwr(around:${DISCOVERY_RADIUS_METERS},${lat},${lon})["amenity"~"^(restaurant|fast_food|cafe)$"]["name"];`;
+    });
+
+    return `[out:json][timeout:35];
+(
+${clauses.join("\n")}
+);
+out center tags meta;`;
+  }
+
+  function convertOsmElement(element, routeSamples) {
+    const tags = element?.tags || {};
+    const name = String(tags.name || "").trim();
+    if (!name) return null;
+
+    const coordinates = element.type === "node"
+      ? [Number(element.lon), Number(element.lat)]
+      : [
+          Number(element.center?.lon),
+          Number(element.center?.lat)
+        ];
+
+    if (!coordinates.every(Number.isFinite)) return null;
+
+    const amenity = String(tags.amenity || "restaurant");
+    const cuisine = formatCuisine(tags.cuisine);
+    const chain = detectChain(name, tags);
+    const website =
+      tags.website ||
+      tags["contact:website"] ||
+      tags["website:menu"] ||
+      "";
+    const phone = tags.phone || tags["contact:phone"] || "";
+    const publishedHours = tags.opening_hours || "";
+    const address = buildAddress(tags);
+    const city =
+      tags["addr:city"] ||
+      tags["addr:town"] ||
+      tags["addr:village"] ||
+      tags["addr:hamlet"] ||
+      "Along route";
+
+    const metadataCount = [
+      cuisine,
+      website,
+      phone,
+      publishedHours,
+      address,
+      tags.wikidata || tags["brand:wikidata"]
+    ].filter(Boolean).length;
+
+    const confidence = metadataCount >= 4 ? "Medium" : "Low";
+    const discoveryConfidence = metadataCount >= 4 ? "medium" : "low";
+    const qualityBase =
+      amenity === "restaurant" ? 71 :
+      amenity === "cafe" ? 68 :
+      65;
+    const foodReputation = clamp(
+      qualityBase +
+      (cuisine ? 2 : 0) +
+      (website ? 2 : 0) +
+      (publishedHours ? 2 : 0) -
+      (chain ? 4 : 0),
+      58,
+      77
+    );
+    const uniqueness = clamp(
+      (cuisine ? 66 : 55) +
+      (tags.wikidata ? 3 : 0) -
+      (chain ? 18 : 0),
+      35,
+      72
+    );
+    const routeBucket = nearestSampleIndex(coordinates, routeSamples);
+
+    return {
+      id: `osm-${element.type}-${element.id}`,
+      osmType: element.type,
+      osmId: element.id,
+      name,
+      city,
+      address: address || city,
+      coordinates,
+      coordinatePrecision: "OpenStreetMap feature",
+      category: cuisine || amenityLabel(amenity),
+      cuisine: cuisine || "",
+      chain,
+      brand: tags.brand || "",
+      amenity,
+      priceLevel: "$$",
+      quickStop:
+        amenity === "fast_food" ||
+        amenity === "cafe" ||
+        String(tags.takeaway || "").toLowerCase() === "yes",
+      sitDown: amenity !== "fast_food",
+      localFavorite: false,
+      regionalSpecialty: false,
+      kidFriendly: false,
+      easyParking:
+        String(tags.parking || "").toLowerCase() === "yes" ||
+        Boolean(tags["parking:lane"]),
+      foodReputation,
+      destinationWorthiness: clamp(foodReputation - 4, 54, 73),
+      uniqueness,
+      reviewConfidence: clamp(46 + metadataCount * 3, 46, 64),
+      consistency: 64,
+      famousFor: cuisine
+        ? `Cuisine listed as ${cuisine}`
+        : `Route-discovered ${amenityLabel(amenity).toLowerCase()}`,
+      evidenceSummary:
+        "Discovered along the current route from OpenStreetMap. DetourEats has not independently reviewed its food quality.",
+      openAtArrival: null,
+      hoursConfidence: publishedHours ? "listed_not_evaluated" : "unknown",
+      publishedHours: publishedHours || "Not listed in OpenStreetMap",
+      website,
+      phone,
+      confidence,
+      discoveryConfidence,
+      provenance: "route-discovered",
+      discoverySource: "openstreetmap",
+      sourceType: "Route-discovered from OpenStreetMap",
+      sourceUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+      verifiedDate: element.timestamp
+        ? `OSM feature updated ${formatDate(element.timestamp)}`
+        : "Discovered on current route",
+      mappedTimestamp: element.timestamp || "",
+      operationalRisk:
+        "Route-discovered option. Hours and food quality are not independently verified.",
+      routeBucket,
+      discoveryRank: metadataCount * 10 + foodReputation - (chain ? 15 : 0)
+    };
+  }
+
+  function selectDistributedDiscovered(candidates, routeSamples) {
+    const deduped = dedupeCandidates(candidates);
+    const buckets = new Map();
+
+    for (const candidate of deduped) {
+      const bucket = Number(candidate.routeBucket || 0);
+      if (!buckets.has(bucket)) buckets.set(bucket, []);
+      buckets.get(bucket).push(candidate);
+    }
+
+    const selected = [];
+    for (const bucket of [...buckets.keys()].sort((a, b) => a - b)) {
+      const options = buckets.get(bucket).sort(
+        (a, b) => Number(b.discoveryRank) - Number(a.discoveryRank)
+      );
+      selected.push(...options.slice(0, 2));
+    }
+
+    return selected
+      .sort((a, b) => {
+        if (a.routeBucket !== b.routeBucket) {
+          return a.routeBucket - b.routeBucket;
+        }
+        return b.discoveryRank - a.discoveryRank;
+      })
+      .slice(0, MAX_DISCOVERED_CANDIDATES);
+  }
+
+  function mergeCandidates(curated, discovered) {
+    const combined = [...curated, ...discovered];
+    const seen = new Map();
+
+    for (const candidate of combined) {
+      const key = normalizeName(candidate.name);
+      const existing = seen.get(key);
+
+      if (!existing) {
+        seen.set(key, candidate);
+        continue;
+      }
+
+      if (
+        existing.provenance === "route-discovered" &&
+        candidate.provenance === "curated"
+      ) {
+        seen.set(key, candidate);
+      }
+    }
+
+    return [...seen.values()];
+  }
+
+  function selectCandidatesForRouting(candidates, routeSamples) {
+    return candidates
+      .map(candidate => ({
+        ...candidate,
+        routeBucket:
+          candidate.routeBucket ??
+          nearestSampleIndex(candidate.coordinates, routeSamples)
+      }))
+      .sort((a, b) => {
+        if (a.routeBucket !== b.routeBucket) {
+          return a.routeBucket - b.routeBucket;
+        }
+        if (a.provenance !== b.provenance) {
+          return a.provenance === "curated" ? -1 : 1;
+        }
+        return Number(b.discoveryRank || 0) - Number(a.discoveryRank || 0);
+      })
+      .slice(0, MAX_ROUTED_CANDIDATES);
+  }
+
+  function dedupeCandidates(candidates) {
+    const seenIds = new Set();
+    const seenNames = new Set();
+    const result = [];
+
+    for (const candidate of candidates) {
+      const idKey = `${candidate.osmType}-${candidate.osmId}`;
+      const nameKey = normalizeName(candidate.name);
+
+      if (seenIds.has(idKey) || seenNames.has(nameKey)) continue;
+      seenIds.add(idKey);
+      seenNames.add(nameKey);
+      result.push(candidate);
+    }
+
+    return result;
+  }
+
+  function sampleRoute(coordinates) {
+    if (!Array.isArray(coordinates) || coordinates.length < 2) {
+      return coordinates || [];
+    }
+
+    const distances = [0];
+    let total = 0;
+
+    for (let index = 1; index < coordinates.length; index += 1) {
+      total += distanceMeters(coordinates[index - 1], coordinates[index]);
+      distances.push(total);
+    }
+
+    const sampleCount = clamp(
+      Math.ceil(total / 70000) + 1,
+      5,
+      MAX_ROUTE_SAMPLES
+    );
+    const samples = [];
+
+    for (let sampleIndex = 0; sampleIndex < sampleCount; sampleIndex += 1) {
+      const target =
+        total * (sampleIndex / Math.max(1, sampleCount - 1));
+      let coordinateIndex = 0;
+
+      while (
+        coordinateIndex < distances.length - 1 &&
+        distances[coordinateIndex] < target
+      ) {
+        coordinateIndex += 1;
+      }
+
+      samples.push(coordinates[coordinateIndex]);
+    }
+
+    return dedupeCoordinatePairs(samples);
+  }
+
+  function nearestSampleIndex(coordinates, samples) {
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+
+    samples.forEach((sample, index) => {
+      const distance = distanceMeters(coordinates, sample);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    });
+
+    return bestIndex;
+  }
+
+  function distanceToSamples(coordinates, samples) {
+    return Math.min(
+      ...samples.map(sample => distanceMeters(coordinates, sample))
+    );
   }
 
   function findDecisionPoint(leg) {
@@ -353,6 +766,82 @@
       seconds: Math.max(0, Number(leg?.duration || 0) - 600),
       instruction: "Be ready to leave the main route for this stop."
     };
+  }
+
+  function detectChain(name, tags) {
+    const haystack = [
+      name,
+      tags.brand,
+      tags.operator,
+      tags["brand:wikidata"]
+    ].filter(Boolean).join(" ").toLowerCase();
+
+    if (tags["brand:wikidata"]) return true;
+    return KNOWN_CHAINS.some(chain => haystack.includes(chain));
+  }
+
+  function buildAddress(tags) {
+    const street = [
+      tags["addr:housenumber"],
+      tags["addr:street"]
+    ].filter(Boolean).join(" ");
+    const locality = [
+      tags["addr:city"] || tags["addr:town"] || tags["addr:village"],
+      tags["addr:state"],
+      tags["addr:postcode"]
+    ].filter(Boolean).join(", ");
+
+    return [street, locality].filter(Boolean).join(", ");
+  }
+
+  function amenityLabel(value) {
+    if (value === "fast_food") return "Quick service";
+    if (value === "cafe") return "Cafe";
+    return "Restaurant";
+  }
+
+  function formatCuisine(value) {
+    if (!value) return "";
+    return String(value)
+      .split(";")
+      .map(part => part.trim().replaceAll("_", " "))
+      .filter(Boolean)
+      .slice(0, 3)
+      .map(titleCase)
+      .join(" / ");
+  }
+
+  function titleCase(value) {
+    return String(value)
+      .split(/\s+/)
+      .map(word => word ? word[0].toUpperCase() + word.slice(1) : "")
+      .join(" ");
+  }
+
+  function normalizeName(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function dedupeCoordinatePairs(points) {
+    const seen = new Set();
+    return points.filter(point => {
+      const key = `${Number(point[0]).toFixed(4)},${Number(point[1]).toFixed(4)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      year: "numeric"
+    }).format(date);
   }
 
   function distanceMeters(a, b) {

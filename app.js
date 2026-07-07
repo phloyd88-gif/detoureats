@@ -1,4 +1,4 @@
-/* DetourEats v1.1 Beta app layer
+/* DetourEats v1.2 Beta app layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -217,7 +217,11 @@ function normalizePick(rawPick) {
   const name = rawPick.name ?? rawPick.restaurant ?? "Recommended Stop";
   const signature = rawPick.signatureDish ?? rawPick.famousFor ?? rawPick.tagline ?? rawPick.summary ?? rawPick.evidenceSummary ?? "Local food worth considering.";
   const arrival = rawPick.arrivalTime ?? rawPick.arrivalClock ?? rawPick.eta ?? estimateArrival(rawPick);
-  const open = rawPick.openAtArrival ?? rawPick.isOpen ?? rawPick.hours?.open ?? true;
+  const open =
+    rawPick.hoursConfidence === "unknown" ||
+    rawPick.hoursConfidence === "listed_not_evaluated"
+      ? null
+      : (rawPick.openAtArrival ?? rawPick.isOpen ?? rawPick.hours?.open ?? true);
   const chain = Boolean(rawPick.chain);
   const id = String(rawPick.id ?? rawPick.name ?? Math.random());
 
@@ -448,9 +452,16 @@ function renderDriverStatus(pick, result, trip) {
         ? "No decision needed"
         : "Watching ahead";
 
+    const discoverySummary =
+      Number(metrics.discoveredCount || 0) > 0
+        ? `${metrics.discoveredCount} route-discovered · ${metrics.curatedCount || 0} curated`
+        : metrics.discoveryStatus === "unavailable"
+          ? "Restaurant discovery unavailable; curated stops only"
+          : `${metrics.curatedCount || 0} curated stops`;
+
     els.routingProgressMessage.textContent =
       state.routingMessage ||
-      `Live route updated ${formatRelativeUpdate(metrics.updatedAt)}`;
+      `${discoverySummary} · updated ${formatRelativeUpdate(metrics.updatedAt)}`;
     els.routingProgressMessage.classList.remove("hidden");
     els.demoToggleButton.classList.add("hidden");
     els.debugPanel.classList.add("hidden");
@@ -546,6 +557,12 @@ function getDecisionTiming(pick) {
 function getConfidenceStatus(pick) {
   const confidence = String(pick.confidence || "Medium").toLowerCase();
   const risk = String(pick.operationalRisk || "").toLowerCase();
+
+  if (pick.provenance === "route-discovered") {
+    return pick.open === null
+      ? { label: "Hours unverified", className: "confidence-risk" }
+      : { label: "Discovery data", className: "confidence-medium" };
+  }
 
   if (pick.open === false) {
     return { label: "Verify hours", className: "confidence-risk" };
@@ -674,10 +691,36 @@ function getScoreComparison(pick, result) {
   };
 }
 
+function getProvenanceStatus(pick) {
+  if (pick?.provenance === "route-discovered") {
+    return {
+      label: "Route-discovered",
+      className: "provenance-discovered",
+      detail: "Found automatically along this live route"
+    };
+  }
+
+  return {
+    label: "Curated",
+    className: "provenance-curated",
+    detail: "Reviewed for the DetourEats test database"
+  };
+}
+
+function getHoursStatus(pick) {
+  if (pick.open === true) return "Open at arrival";
+  if (pick.open === false) return "Closed at arrival";
+  if (pick.publishedHours && pick.publishedHours !== "Not listed in OpenStreetMap") {
+    return "Hours listed, arrival not verified";
+  }
+  return "Hours not verified";
+}
+
 function renderTrustSnapshot(pick) {
   const routeMode = pick.liveRoute ? "Live route" : "Curated route";
+  const provenance = getProvenanceStatus(pick);
   const confidence = pick.confidence || "Medium";
-  const hours = pick.open ? "Open at arrival" : "Hours need verification";
+  const hours = getHoursStatus(pick);
   const freshness = pick.verifiedDate || "Prototype dataset";
   const risk = pick.operationalRisk
     ? `<div class="trust-alert">${escapeHtml(pick.operationalRisk)}</div>`
@@ -689,10 +732,14 @@ function renderTrustSnapshot(pick) {
         <span>Trust snapshot</span>
         <strong>${escapeHtml(routeMode)}</strong>
       </div>
+      <div class="provenance-banner ${provenance.className}">
+        <strong>${escapeHtml(provenance.label)}</strong>
+        <span>${escapeHtml(provenance.detail)}</span>
+      </div>
       <div class="trust-snapshot-grid">
         <div><span>Restaurant data</span><strong>${escapeHtml(confidence)} confidence</strong></div>
         <div><span>Hours</span><strong>${escapeHtml(hours)}</strong></div>
-        <div><span>Last checked</span><strong>${escapeHtml(freshness)}</strong></div>
+        <div><span>Data status</span><strong>${escapeHtml(freshness)}</strong></div>
       </div>
       ${risk}
     </div>
@@ -724,8 +771,9 @@ function renderDecisionCard(pick, trip, copy) {
   }
 
   const tier = getRecommendationTier(pick);
-  const openLabel = pick.open ? "Open at arrival" : "Verify hours";
+  const openLabel = getHoursStatus(pick);
   const confidence = getConfidenceStatus(pick);
+  const provenance = getProvenanceStatus(pick);
   const timing = getDecisionTiming(pick);
   const comparison = getScoreComparison(pick, state.currentResult);
   const explanation = pick.scoreExplanation || {};
@@ -737,7 +785,10 @@ function renderDecisionCard(pick, trip, copy) {
   els.decisionCard.innerHTML = `
     <div class="decision-card-top">
       <div class="badge ${trip.badgeClass}">${escapeHtml(tier)}</div>
-      <div class="confidence-chip ${confidence.className}">${escapeHtml(confidence.label)}</div>
+      <div class="card-status-chips">
+        <div class="provenance-chip ${provenance.className}">${escapeHtml(provenance.label)}</div>
+        <div class="confidence-chip ${confidence.className}">${escapeHtml(confidence.label)}</div>
+      </div>
     </div>
 
     <div class="score-and-decision">
@@ -867,8 +918,16 @@ function renderTripTimeline(pick, result) {
     })
     .slice(0, 6);
 
-  els.timelineModeLabel.textContent =
-    state.routingMode === "live" ? "Live location" : "Curated route";
+  if (state.routingMode === "live") {
+    const discovered = Number(state.liveMetrics?.discoveredCount || 0);
+    const curated = Number(state.liveMetrics?.curatedCount || 0);
+    els.timelineModeLabel.textContent =
+      discovered > 0
+        ? `${discovered} discovered · ${curated} curated`
+        : "Live location";
+  } else {
+    els.timelineModeLabel.textContent = "Curated route";
+  }
 
   if (!candidates.length) {
     els.foodZoneSummary.innerHTML =
@@ -910,6 +969,9 @@ function renderTripTimeline(pick, result) {
           </div>
           <h3>${escapeHtml(candidate.name)}</h3>
           <p>${escapeHtml(candidate.city || candidate.category || "")}</p>
+          <div class="timeline-provenance ${candidate.provenance === "route-discovered" ? "provenance-discovered" : "provenance-curated"}">
+            ${candidate.provenance === "route-discovered" ? "Route-discovered option" : "Curated recommendation"}
+          </div>
           <div class="timeline-meta">
             <span>${escapeHtml(timing)}</span>
             <span>Adds ${candidate.added} min</span>
@@ -1044,10 +1106,11 @@ function renderDetailsPanel(pick, trip, copy) {
     </ul>
 
     <div class="trust-section">
-      <h3>Verified facts</h3>
+      <h3>${pick.provenance === "route-discovered" ? "Available route data" : "Verified facts"}</h3>
       <div class="trust-row"><span>Restaurant</span><strong>${escapeHtml(pick.name)}</strong></div>
       <div class="trust-row"><span>Location</span><strong>${escapeHtml(pick.address || pick.city || "")}</strong></div>
-      <div class="trust-row"><span>Published hours</span><strong>${escapeHtml(pick.publishedHours || "Check before leaving route")}</strong></div>
+      <div class="trust-row"><span>Published hours</span><strong>${escapeHtml(pick.publishedHours || "Not available")}</strong></div>
+      <div class="trust-row"><span>Recommendation type</span><strong>${escapeHtml(getProvenanceStatus(pick).label)}</strong></div>
       <div class="trust-row"><span>Source</span><strong>${escapeHtml(pick.sourceType || "Curated source")}</strong></div>
       <div class="trust-row"><span>Data confidence</span><strong>${escapeHtml(pick.confidence || "Medium")}</strong></div>
       <div class="trust-row"><span>Last checked</span><strong>${escapeHtml(pick.verifiedDate || "Prototype dataset")}</strong></div>
@@ -1071,9 +1134,11 @@ function renderDetailsPanel(pick, trip, copy) {
 
     <div class="editorial-section">
       <h3>DetourEats judgment</h3>
-      <p>${pick.liveRoute
-        ? "Route order, distance ahead, arrival timing, decision timing, and added trip time use the current beta route calculation. Restaurant hours and Detour Score remain curated."
-        : "Route position, arrival time, and added-trip time are curated estimates in demo mode."}</p>
+      <p>${pick.provenance === "route-discovered"
+        ? "Route position and detour timing use the live route. Restaurant quality is estimated conservatively from available map metadata, so the Detour Score is capped until stronger editorial evidence is available."
+        : pick.liveRoute
+          ? "Route order, distance ahead, arrival timing, decision timing, and added trip time use the current beta route calculation. Restaurant hours and Detour Score remain curated."
+          : "Route position, arrival time, and added-trip time are curated estimates in demo mode."}</p>
     </div>
     ${risk}
   `;
@@ -1276,9 +1341,12 @@ async function activateLiveRoute() {
     applyLiveSnapshot(result.snapshot);
     startLocationWatch();
 
+    const discovered = Number(result.snapshot?.metrics?.discoveredCount || 0);
     showToast(
-      "Live location active",
-      "Recommendations now update from your real position."
+      "Live route ready",
+      discovered > 0
+        ? `${discovered} additional restaurant options were discovered along this route.`
+        : "Recommendations now update from your real position."
     );
   } catch (error) {
     console.error(error);

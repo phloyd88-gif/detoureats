@@ -112,7 +112,15 @@ It is restaurant quality filtered through trip fit.
       famousFor: c.famousFor ?? c.signatureDish ?? c.signatureItem ?? c.tagline ?? "Local favorite",
       evidenceSummary: c.evidenceSummary ?? c.summary ?? c.why ?? c.famousFor ?? "Strong food stop for this route.",
       arrivalClock: c.arrivalClock ?? c.arrivalTime ?? c.eta ?? "",
-      openAtArrival: c.openAtArrival ?? c.isOpen ?? true,
+      openAtArrival:
+        c.hoursConfidence === "unknown" ||
+        c.hoursConfidence === "listed_not_evaluated"
+          ? null
+          : (c.openAtArrival ?? c.isOpen ?? true),
+      hoursConfidence: c.hoursConfidence || "verified",
+      provenance: c.provenance || "curated",
+      discoverySource: c.discoverySource || null,
+      discoveryConfidence: c.discoveryConfidence || null,
       backtracking: Boolean(c.backtracking),
       betterOptionMilesAhead: c.betterOptionMilesAhead ?? null,
       priceLevel: c.priceLevel ?? "$$",
@@ -179,7 +187,10 @@ It is restaurant quality filtered through trip fit.
     );
 
     const timeFit = scoreAddedTime(c.estimatedAddedMinutes, maxAdded);
-    const openFit = c.openAtArrival === false ? 45 : 100;
+    const openFit =
+      c.openAtArrival === false ? 45 :
+      c.openAtArrival === null ? 78 :
+      100;
     const chainFit = c.chain ? 55 : 100;
     const backtrackFit = c.backtracking ? 0 : 100;
     const scarcityFit = scoreScarcity(c, allCandidates, settings);
@@ -259,6 +270,18 @@ It is restaurant quality filtered through trip fit.
     }
     if (restaurantQuality < 74) {
       detourScore = Math.min(detourScore, 82);
+    }
+
+    // Route-discovered places have useful location data but incomplete
+    // editorial quality and hours verification. They cannot receive elite
+    // scores until stronger evidence is available.
+    if (
+      c.provenance === "route-discovered" ||
+      c.discoverySource === "openstreetmap"
+    ) {
+      const discoveryCap =
+        c.discoveryConfidence === "medium" ? 86 : 81;
+      detourScore = Math.min(detourScore, discoveryCap);
     }
 
     detourScore = Math.round(detourScore);
@@ -716,7 +739,17 @@ It is restaurant quality filtered through trip fit.
   function explainScore(c, s) {
     const bullets = [];
 
-    if (!c.chain) bullets.push("Independent/local stop instead of a default chain.");
+    if (
+      c.provenance === "route-discovered" ||
+      c.discoverySource === "openstreetmap"
+    ) {
+      bullets.push("Route-discovered option with incomplete editorial quality data.");
+      if (c.openAtArrival === null) {
+        bullets.push("Published hours were not verified against the estimated arrival time.");
+      }
+    } else if (!c.chain) {
+      bullets.push("Independent/local stop instead of a default chain.");
+    }
     if (c.estimatedAddedMinutes <= s.maxAdded) {
       bullets.push(`Only adds ${c.estimatedAddedMinutes} minutes to the trip.`);
     } else {

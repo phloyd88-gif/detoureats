@@ -1480,3 +1480,73 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* v1.2 Beta: route discovery and provenance */
+.card-status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.provenance-chip {
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.provenance-curated {
+  color: #14532d;
+  background: #dcfce7;
+}
+.provenance-discovered {
+  color: #1e3a8a;
+  background: #dbeafe;
+}
+.provenance-banner {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+  padding: 9px 10px;
+  border-radius: 11px;
+}
+.provenance-banner strong,
+.provenance-banner span {
+  display: block;
+}
+.provenance-banner strong {
+  font-size: 11px;
+}
+.provenance-banner span {
+  text-align: right;
+  font-size: 9px;
+  font-weight: 750;
+  opacity: 0.82;
+}
+.timeline-provenance {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 7px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 560px) {
+  .card-status-chips {
+    justify-content: flex-start;
+  }
+  .provenance-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .provenance-banner span {
+    text-align: left;
+  }
+}
