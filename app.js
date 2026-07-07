@@ -367,7 +367,7 @@ function renderDecisionCard(pick, trip, copy) {
         <span>ETA ${escapeHtml(String(pick.arrival))}</span>
       </div>
       <div class="fact">
-        <strong>${escapeHtml(chainLabel)}</strong>
+        <strong>${escapeHtml(pick.city || chainLabel)}</strong>
         <span>${escapeHtml(pick.signature)}</span>
       </div>
     </div>
@@ -397,6 +397,13 @@ function renderDetailsPanel(pick, trip, copy) {
   ` : "";
 
   const engineBullets = explanation?.bullets?.length ? explanation.bullets : rationale;
+  const risk = pick.operationalRisk
+    ? `<div class="risk-note"><strong>Watch:</strong> ${escapeHtml(pick.operationalRisk)}</div>`
+    : "";
+
+  const sourceLink = pick.sourceUrl
+    ? `<a class="source-link" href="${escapeHtml(pick.sourceUrl)}" target="_blank" rel="noopener noreferrer">View verification source</a>`
+    : "";
 
   els.detailsPanel.innerHTML = `
     <h2>Why this stop</h2>
@@ -405,6 +412,23 @@ function renderDetailsPanel(pick, trip, copy) {
     <ul class="details-list">
       ${engineBullets.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
     </ul>
+
+    <div class="trust-section">
+      <h3>Verified facts</h3>
+      <div class="trust-row"><span>Restaurant</span><strong>${escapeHtml(pick.name)}</strong></div>
+      <div class="trust-row"><span>Location</span><strong>${escapeHtml(pick.address || pick.city || "")}</strong></div>
+      <div class="trust-row"><span>Published hours</span><strong>${escapeHtml(pick.publishedHours || "Check before leaving route")}</strong></div>
+      <div class="trust-row"><span>Source</span><strong>${escapeHtml(pick.sourceType || "Curated source")}</strong></div>
+      <div class="trust-row"><span>Data confidence</span><strong>${escapeHtml(pick.confidence || "Medium")}</strong></div>
+      <div class="trust-row"><span>Last checked</span><strong>${escapeHtml(pick.verifiedDate || "Prototype dataset")}</strong></div>
+      ${sourceLink}
+    </div>
+
+    <div class="editorial-section">
+      <h3>DetourEats judgment</h3>
+      <p>Detour Score, route position, arrival time, and added-trip time are editorial prototype estimates until live routing is connected.</p>
+    </div>
+    ${risk}
   `;
 }
 

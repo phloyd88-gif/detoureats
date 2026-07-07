@@ -1,4 +1,4 @@
-# DetourEats App v0.4
+# DetourEats App v0.5
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -124,3 +124,25 @@ New:
 Detour Score now means:
 
 > How good of a food decision is this stop for this traveler on this trip right now?
+
+
+## v0.5: Real curated corridor
+
+The prototype now uses actual restaurants along a manually curated
+Amsterdam, NY → Myrtle Beach, SC test corridor.
+
+Added:
+- Real restaurant identities and locations
+- Current published hours and menu specialties
+- Verification source links
+- Data-confidence labels
+- Last-checked dates
+- Operational warnings such as limited hours, sellout risk, or cash-only policies
+- Explicit separation between verified facts and DetourEats editorial judgment
+
+Important limitations:
+- Added-trip time remains an estimate
+- Arrival time remains simulated
+- Route position remains manually sequenced
+- Opening status is based on the simulated trip time, not live navigation
+- The prototype should not be treated as live routing software

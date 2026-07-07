@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5
+- Replaced fictional restaurants with a curated real test corridor.
+- Added source links, data confidence, verification dates, addresses, and published hours.
+- Added operational-risk warnings for sellouts, limited hours, and payment restrictions.
+- Clearly separated verified restaurant facts from editorial DetourEats scoring and estimated routing data.
+
+
 ## v0.4
 - Added a dedicated Detour Score engine.
 - Added richer sample route data with food reputation, uniqueness, confidence, consistency, and destination-worthiness.
