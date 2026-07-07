@@ -1,4 +1,4 @@
-# DetourEats App v1.6 Beta
+# DetourEats App v1.7 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -525,3 +525,48 @@ The route service can now evaluate farther candidates before scoring:
 These are evaluation ceilings, not automatic recommendations. The user's
 selected Max Added Time remains a major scoring input, and farther candidates
 must demonstrate a stronger reason to justify the trip cost.
+
+
+## v1.7 Beta: Exceptional Detour Override
+
+A strict rare-place scan now runs on every route regardless of the selected
+Eating Priority.
+
+### Separate from the normal recommendation
+
+The exceptional override does not replace the ordinary DetourEats decision.
+
+While using **Eat soon**, for example:
+
+- The main recommendation can remain a convenient nearby stop
+- A separate rare-opportunity card can identify a potential bucket-list place
+- The driver chooses **Add Stop** or **Keep Current Plan**
+- Dismissing it prevents another alert for that restaurant during the trip
+
+### Strict qualification
+
+The rare-place scan checks up to approximately 25 miles from the route.
+
+A route-discovered candidate must have strong available map evidence, no
+common-chain classification, high destination-worthiness, meaningful
+uniqueness, acceptable estimated food reputation, no closed-at-arrival signal,
+and no more than 45 minutes of actual added trip time.
+
+Curated candidates use a separate high food-quality, uniqueness, and
+destination-worthiness threshold.
+
+### Alert timing
+
+An exceptional opportunity can produce:
+
+- an early rare-place alert within approximately 45 minutes of the route decision
+- a final decision alert within approximately 5 minutes
+
+Voice, browser notifications, and the on-screen alert use the same opportunity.
+The normal recommendation remains active unless the user selects **Add Stop**.
+
+### Evidence limitation
+
+For route-discovered restaurants, exceptional means the candidate cleared a
+strict available-data threshold. It does not mean DetourEats independently
+verified national reputation, awards, food quality, or operating hours.

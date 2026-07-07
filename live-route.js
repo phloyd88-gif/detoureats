@@ -1,4 +1,4 @@
-/* DetourEats v1.6 Beta adaptive detour discovery module
+/* DetourEats v1.7 Beta exceptional-detour discovery module
    No account or API token is required.
 
    Prototype services:
@@ -27,13 +27,15 @@
   const PRACTICAL_RADIUS_METERS = 8000;      // about 5 miles
   const EXTENDED_RADIUS_METERS = 24000;      // about 15 miles
   const DESTINATION_RADIUS_METERS = 40000;   // about 25 miles
+  const EXCEPTIONAL_RADIUS_METERS = 40000;   // always-on strict scan
   const HUNGRY_FALLBACK_RADIUS_METERS = 12000;
 
   const MAX_ROUTE_SAMPLES = 28;
   const WIDE_ROUTE_SAMPLES = 16;
+  const EXCEPTIONAL_ROUTE_SAMPLES = 10;
   const ROUTE_SAMPLE_SPACING_METERS = 35000;
-  const MAX_DISCOVERED_CANDIDATES = 28;
-  const MAX_ROUTED_CANDIDATES = 30;
+  const MAX_DISCOVERED_CANDIDATES = 32;
+  const MAX_ROUTED_CANDIDATES = 34;
 
   const KNOWN_CHAINS = [
     "mcdonald", "burger king", "wendy", "taco bell", "kfc",
@@ -384,10 +386,18 @@
         );
         const milesAhead = metersToMiles(Number(firstLeg.distance || 0));
 
-        if (addedMinutes > maximumDetour) continue;
+        const candidateMaximumDetour = candidate.exceptionalOnly
+          ? Math.max(maximumDetour, 45)
+          : maximumDetour;
+        const candidateBacktrackAllowanceSeconds = candidate.exceptionalOnly
+          ? Math.max(backtrackAllowanceSeconds, 4500)
+          : backtrackAllowanceSeconds;
+
+        if (addedMinutes > candidateMaximumDetour) continue;
         if (
           Number(firstLeg.duration || 0) >
-          Number(baseline.duration || 0) + backtrackAllowanceSeconds
+          Number(baseline.duration || 0) +
+            candidateBacktrackAllowanceSeconds
         ) {
           continue;
         }
@@ -495,6 +505,18 @@
           "Practical route corridor with wider evidence-based discovery",
         extendedSearchUsed: Boolean(session.discoveryPlan?.extendedUsed),
         destinationSearchUsed: Boolean(session.discoveryPlan?.destinationUsed),
+        exceptionalSearchUsed: Boolean(
+          session.discoveryPlan?.exceptionalSearchUsed
+        ),
+        exceptionalRadiusMiles: Number(
+          session.discoveryPlan?.exceptionalRadiusMiles ||
+          metersToMiles(EXCEPTIONAL_RADIUS_METERS)
+        ),
+        exceptionalCandidateCount: liveCandidates.filter(
+          candidate =>
+            candidate.exceptionalScan ||
+            candidate.exceptionalOnly
+        ).length,
         updatedAt: Date.now()
       }
     };
@@ -519,6 +541,7 @@
 
     let extended = [];
     let destination = [];
+    let exceptional = [];
 
     const hungry = style === "hungry";
     const adventure = style === "adventure";
@@ -571,11 +594,35 @@
       });
     }
 
+    if (destinationUsed) {
+      exceptional = destination
+        .filter(isStrictExceptionalDiscoveryCandidate)
+        .map(candidate => ({
+          ...candidate,
+          exceptionalScan: true,
+          exceptionalOnly: false
+        }));
+    } else {
+      exceptional = await fetchDiscoveryTier({
+        routeSamples: reduceRouteSamples(
+          routeSamples,
+          EXCEPTIONAL_ROUTE_SAMPLES
+        ),
+        radiusMeters: EXCEPTIONAL_RADIUS_METERS,
+        evidenceMode: "exceptional",
+        searchTier: "exceptional",
+        progressMessage:
+          "Quietly checking for rare bucket-list opportunities",
+        progressCallback
+      });
+    }
+
     const candidates = selectDistributedDiscovered(
       dedupeCandidates([
         ...practical,
         ...extended,
-        ...destination
+        ...destination,
+        ...exceptional
       ]),
       routeSamples
     );
@@ -607,6 +654,11 @@
         destinationRadiusMiles: destinationUsed
           ? metersToMiles(DESTINATION_RADIUS_METERS)
           : 0,
+        exceptionalSearchUsed: true,
+        exceptionalRadiusMiles: metersToMiles(
+          EXCEPTIONAL_RADIUS_METERS
+        ),
+        exceptionalFound: exceptional.length,
         maximumRadiusMiles: metersToMiles(maximumRadiusMeters),
         label:
           destinationUsed
@@ -614,15 +666,16 @@
             : extendedUsed
               ? "Adaptive search · extended detours included"
               : "Adaptive search · practical corridor",
-        summary: buildDiscoveryPlanSummary({
+        summary: `${buildDiscoveryPlanSummary({
           style,
           extendedUsed,
           destinationUsed,
           practicalSparse
-        }),
+        })} A separate strict rare-place scan remained on up to about 25 miles from the route.`,
         practicalFound: practical.length,
         extendedFound: extended.length,
-        destinationFound: destination.length
+        destinationFound: destination.length,
+        exceptionalFound: exceptional.length
       }
     };
   }
@@ -699,6 +752,9 @@
       )
       .filter(Boolean)
       .filter(candidate => {
+        if (searchTier === "exceptional") {
+          return isStrictExceptionalDiscoveryCandidate(candidate);
+        }
         if (searchTier === "destination") {
           return candidate.destinationEvidenceLevel === "strong";
         }
@@ -734,14 +790,16 @@ ${selector};
 out center tags meta;`;
     }
 
-    const evidenceTags = evidenceMode === "destination"
-      ? [
-          "wikidata",
-          "wikipedia",
-          "award",
-          "stars"
-        ]
-      : [
+    const evidenceTags =
+      evidenceMode === "destination" ||
+      evidenceMode === "exceptional"
+        ? [
+            "wikidata",
+            "wikipedia",
+            "award",
+            "stars"
+          ]
+        : [
           "wikidata",
           "wikipedia",
           "website",
@@ -753,9 +811,14 @@ out center tags meta;`;
 
     const clauses = evidenceTags.map(tag => `${selector}["${tag}"];`);
 
-    if (evidenceMode === "destination") {
+    if (
+      evidenceMode === "destination" ||
+      evidenceMode === "exceptional"
+    ) {
       clauses.push(`${selector}["website"]["description"];`);
-      clauses.push(`${selector}["contact:website"]["description"];`);
+      clauses.push(
+        `${selector}["contact:website"]["description"];`
+      );
     }
 
     return `[out:json][timeout:50];
@@ -776,9 +839,15 @@ out center tags meta;`;
       practicalRadiusMiles: metersToMiles(PRACTICAL_RADIUS_METERS),
       extendedRadiusMiles: 0,
       destinationRadiusMiles: 0,
+      exceptionalSearchUsed: true,
+      exceptionalRadiusMiles: metersToMiles(
+        EXCEPTIONAL_RADIUS_METERS
+      ),
+      exceptionalFound: 0,
       maximumRadiusMiles: metersToMiles(PRACTICAL_RADIUS_METERS),
       label: "Adaptive search · practical corridor",
-      summary: "Searching the practical corridor first."
+      summary:
+        "Searching the practical corridor first while a strict rare-place scan stays active."
     };
   }
 
@@ -1070,9 +1139,11 @@ out center tags meta;`;
       provenance: "route-discovered",
       discoverySource: "openstreetmap",
       sourceType:
-        detourTier === "destination"
-          ? "Destination-detour discovery from OpenStreetMap"
-          : detourTier === "extended"
+        searchTier === "exceptional"
+          ? "Strict exceptional-detour scan from OpenStreetMap"
+          : detourTier === "destination"
+            ? "Destination-detour discovery from OpenStreetMap"
+            : detourTier === "extended"
             ? "Extended-detour discovery from OpenStreetMap"
             : "Route discovery from OpenStreetMap",
       sourceUrl:
@@ -1082,22 +1153,41 @@ out center tags meta;`;
         : "Discovered on current route",
       mappedTimestamp: element.timestamp || "",
       operationalRisk:
-        detourTier === "practical"
-          ? "Route-discovered option. Hours and food quality are not independently verified."
-          : `Wider-search candidate ${routeOffsetMiles.toFixed(1)} miles from the route. Actual detour time is calculated, but food quality and hours still require verification.`,
+        searchTier === "exceptional"
+          ? `Rare-opportunity candidate ${routeOffsetMiles.toFixed(1)} miles from the route. Strong map evidence triggered the scan, but DetourEats has not independently verified bucket-list status, food quality, or arrival hours.`
+          : detourTier === "practical"
+            ? "Route-discovered option. Hours and food quality are not independently verified."
+            : `Wider-search candidate ${routeOffsetMiles.toFixed(1)} miles from the route. Actual detour time is calculated, but food quality and hours still require verification.`,
       routeBucket,
       routeOffsetMiles,
       detourTier,
       searchTier,
+      exceptionalScan:
+        searchTier === "exceptional",
+      exceptionalOnly:
+        searchTier === "exceptional",
       destinationEvidenceScore,
       destinationEvidenceLevel,
       discoveryRank:
         destinationEvidenceScore * 14 +
         foodReputation +
-        destinationWorthiness -
+        destinationWorthiness +
+        (searchTier === "exceptional" ? 55 : 0) -
         routeOffsetMiles * 1.4 -
         (chain ? 18 : 0)
     };
+  }
+
+  function isStrictExceptionalDiscoveryCandidate(candidate) {
+    return Boolean(
+      candidate &&
+      !candidate.chain &&
+      candidate.destinationEvidenceLevel === "strong" &&
+      Number(candidate.destinationEvidenceScore || 0) >= 10 &&
+      Number(candidate.destinationWorthiness || 0) >= 84 &&
+      Number(candidate.uniqueness || 0) >= 72 &&
+      Number(candidate.foodReputation || 0) >= 76
+    );
   }
 
   function truncateText(value, limit) {
@@ -1245,11 +1335,22 @@ out center tags meta;`;
       6
     );
 
+    const exceptional = selectTierDistributed(
+      normalized.filter(
+        candidate =>
+          candidate.provenance !== "curated" &&
+          candidate.exceptionalScan
+      ),
+      1,
+      4
+    );
+
     const destination = selectTierDistributed(
       normalized.filter(
         candidate =>
           candidate.provenance !== "curated" &&
-          candidate.detourTier === "destination"
+          candidate.detourTier === "destination" &&
+          !candidate.exceptionalScan
       ),
       1,
       4
@@ -1259,6 +1360,7 @@ out center tags meta;`;
       ...curated,
       ...practical,
       ...extended,
+      ...exceptional,
       ...destination
     ])
       .sort((a, b) => {

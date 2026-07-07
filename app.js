@@ -1,4 +1,4 @@
-/* DetourEats v1.6 Beta app layer
+/* DetourEats v1.7 Beta app layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -28,6 +28,7 @@ const els = {
   chainPolicyInput: document.getElementById("chainPolicyInput"),
   pricePreferenceInput: document.getElementById("pricePreferenceInput"),
   familyFriendlyInput: document.getElementById("familyFriendlyInput"),
+  exceptionalAlertsInput: document.getElementById("exceptionalAlertsInput"),
   currentTimeInput: document.getElementById("currentTimeInput"),
   startTripButton: document.getElementById("startTripButton"),
   voiceToggleButton: document.getElementById("voiceToggleButton"),
@@ -44,6 +45,16 @@ const els = {
   nextFoodZoneText: document.getElementById("nextFoodZoneText"),
   decisionCountdownText: document.getElementById("decisionCountdownText"),
   tripAlertStatusText: document.getElementById("tripAlertStatusText"),
+  exceptionalOpportunityPanel: document.getElementById("exceptionalOpportunityPanel"),
+  exceptionalOpportunityName: document.getElementById("exceptionalOpportunityName"),
+  exceptionalOpportunityScore: document.getElementById("exceptionalOpportunityScore"),
+  exceptionalOpportunityMessage: document.getElementById("exceptionalOpportunityMessage"),
+  exceptionalOpportunityAdded: document.getElementById("exceptionalOpportunityAdded"),
+  exceptionalOpportunityOffset: document.getElementById("exceptionalOpportunityOffset"),
+  exceptionalOpportunityEvidence: document.getElementById("exceptionalOpportunityEvidence"),
+  exceptionalOpportunityCaveat: document.getElementById("exceptionalOpportunityCaveat"),
+  exceptionalNavigateButton: document.getElementById("exceptionalNavigateButton"),
+  exceptionalDismissButton: document.getElementById("exceptionalDismissButton"),
   decisionCard: document.getElementById("decisionCard"),
   decisionConsequencePanel: document.getElementById("decisionConsequencePanel"),
   tripTimelinePanel: document.getElementById("tripTimelinePanel"),
@@ -114,6 +125,7 @@ let state = {
   chainPolicy: "avoid",
   pricePreference: "any",
   familyFriendly: false,
+  exceptionalAlerts: true,
   excludedCategories: new Set(),
   deferUntilSeq: 0,
   minimumScore: 0,
@@ -130,6 +142,9 @@ let state = {
   notificationsEnabled: false,
   voiceEnabled: false,
   announcedAlertKeys: new Set(),
+  announcedExceptionalKeys: new Set(),
+  dismissedExceptionalIds: new Set(),
+  exceptionalOpportunity: null,
   navigationPreference: "",
   pendingNavigationPick: null,
   pendingVisit: null,
@@ -164,6 +179,9 @@ function getEngineResult() {
     chainPolicy: state.chainPolicy,
     pricePreference: state.pricePreference,
     familyFriendly: state.familyFriendly,
+    exceptionalAlerts: state.exceptionalAlerts,
+    dismissedExceptionalIds:
+      Array.from(state.dismissedExceptionalIds),
     learnedPreferences: getLearnedPreferenceProfile(),
     excludedCategories: Array.from(state.excludedCategories),
     deferUntilSeq: state.deferUntilSeq,
@@ -183,7 +201,9 @@ function getEngineResult() {
       ...result,
       pick: result.pick,
       upcoming: result.upcoming || [],
-      evaluated: result.evaluated || []
+      evaluated: result.evaluated || [],
+      exceptionalOpportunity:
+        result.exceptionalOpportunity || null
     };
   }
 
@@ -429,8 +449,13 @@ function render() {
   }
   upcoming = upcoming.filter(item => !state.skippedIds.has(item.id));
 
+  const exceptionalOpportunity = normalizePick(
+    result.exceptionalOpportunity
+  );
+
   state.currentPick = pick;
   state.currentResult = result;
+  state.exceptionalOpportunity = exceptionalOpportunity;
 
   const trip = getTripState(pick, result);
   const copy = getRecommendationCopy(pick, trip);
@@ -445,6 +470,7 @@ function render() {
       : trip.label;
 
   renderDriverStatus(pick, result, trip);
+  renderExceptionalOpportunity(exceptionalOpportunity, pick);
   renderDecisionCard(pick, trip, copy);
   renderDecisionConsequences(pick, result, trip);
   renderTripTimeline(pick, result);
@@ -469,6 +495,7 @@ function render() {
   els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
   els.detailsPanel.classList.toggle("hidden", !state.detailsOpen);
   updateTripAlertStatus();
+  maybeDeliverExceptionalAlert(exceptionalOpportunity);
   maybeDeliverApproachAlert(pick, result);
 }
 
@@ -520,9 +547,15 @@ function renderDriverStatus(pick, result, trip) {
           ? "Restaurant discovery unavailable; curated stops only"
           : `${metrics.curatedCount || 0} curated stops`;
 
+    const discoveryWithExceptional =
+      metrics.exceptionalSearchUsed &&
+      state.exceptionalAlerts
+        ? `${discoverySummary} · rare-place scan on`
+        : discoverySummary;
+
     els.routingProgressMessage.textContent =
       state.routingMessage ||
-      `${discoverySummary} · updated ${formatRelativeUpdate(metrics.updatedAt)}`;
+      `${discoveryWithExceptional} · updated ${formatRelativeUpdate(metrics.updatedAt)}`;
     els.routingProgressMessage.classList.remove("hidden");
     els.demoToggleButton.classList.add("hidden");
     els.debugPanel.classList.add("hidden");
@@ -1508,6 +1541,14 @@ function renderRoutePreview(message = "") {
       <div class="adaptive-search-summary">
         <strong>${escapeHtml(metrics.searchMode || "Adaptive detour search")}</strong>
         <span>${escapeHtml(metrics.searchSummary || `Searched up to approximately ${Number(metrics.searchRadiusMiles || 5).toFixed(0)} miles from the route.`)}</span>
+        ${metrics.exceptionalSearchUsed &&
+          els.exceptionalAlertsInput?.checked !== false ? `
+          <small>
+            Rare-place override: strict scan on up to approximately
+            ${Number(metrics.exceptionalRadiusMiles || 25).toFixed(0)} miles,
+            regardless of Eating Priority.
+          </small>
+        ` : ""}
       </div>
     </div>
   `;
@@ -1677,7 +1718,9 @@ function savePreferences() {
     foodPreference: els.foodPreferenceInput?.value || state.foodPreference || "anything",
     chainPolicy: els.chainPolicyInput?.value || state.chainPolicy || "avoid",
     pricePreference: els.pricePreferenceInput?.value || state.pricePreference || "any",
-    familyFriendly: Boolean(els.familyFriendlyInput?.checked)
+    familyFriendly: Boolean(els.familyFriendlyInput?.checked),
+    exceptionalAlerts:
+      els.exceptionalAlertsInput?.checked !== false
   };
 
   try {
@@ -1719,6 +1762,10 @@ function loadPreferences() {
   if (els.familyFriendlyInput) {
     els.familyFriendlyInput.checked = Boolean(saved.familyFriendly);
   }
+  if (els.exceptionalAlertsInput) {
+    els.exceptionalAlertsInput.checked =
+      saved.exceptionalAlerts !== false;
+  }
 }
 
 function showToast(title, message) {
@@ -1746,6 +1793,8 @@ async function startTrip() {
   state.chainPolicy = els.chainPolicyInput?.value || "avoid";
   state.pricePreference = els.pricePreferenceInput?.value || "any";
   state.familyFriendly = Boolean(els.familyFriendlyInput?.checked);
+  state.exceptionalAlerts =
+    els.exceptionalAlertsInput?.checked !== false;
   state.excludedCategories = new Set();
   state.deferUntilSeq = 0;
   state.minimumScore = 0;
@@ -1758,6 +1807,9 @@ async function startTrip() {
   state.hoursMode = els.hoursModeInput?.value || "requireOpen";
   state.skippedIds = new Set();
   state.announcedAlertKeys = new Set();
+  state.announcedExceptionalKeys = new Set();
+  state.dismissedExceptionalIds = new Set();
+  state.exceptionalOpportunity = null;
   state.feedbackPromptShown = false;
   savePreferences();
 
@@ -2301,12 +2353,184 @@ function toggleVoiceGuidance() {
   }
 }
 
+function renderExceptionalOpportunity(
+  opportunity,
+  normalPick
+) {
+  if (
+    !opportunity ||
+    !state.exceptionalAlerts ||
+    state.dismissedExceptionalIds.has(opportunity.id) ||
+    !isExceptionalOpportunityApproaching(opportunity)
+  ) {
+    els.exceptionalOpportunityPanel.classList.add("hidden");
+    return;
+  }
+
+  const sameAsNormalPick =
+    normalPick && normalPick.id === opportunity.id;
+  const added = Number(opportunity.added || 0);
+  const offset = Number(
+    opportunity.routeOffsetMiles || 0
+  );
+  const score = Number(
+    opportunity.exceptionalScore ||
+    opportunity.score ||
+    0
+  );
+
+  els.exceptionalOpportunityName.textContent =
+    opportunity.name;
+  els.exceptionalOpportunityScore.textContent =
+    score ? String(score) : "Rare";
+  els.exceptionalOpportunityMessage.textContent =
+    sameAsNormalPick
+      ? `${opportunity.name} also clears the exceptional-detour override.`
+      : `${opportunity.name} is a separate rare opportunity and does not replace your current ${formatPreferenceLabel(state.tripMode)} recommendation.`;
+  els.exceptionalOpportunityAdded.textContent =
+    `${added} min`;
+  els.exceptionalOpportunityOffset.textContent =
+    offset > 0
+      ? `${offset.toFixed(1)} mi`
+      : "Route-calculated";
+  els.exceptionalOpportunityEvidence.textContent =
+    opportunity.exceptionalEvidence ||
+    formatEvidenceLevel(
+      opportunity.destinationEvidenceLevel
+    );
+  els.exceptionalOpportunityCaveat.textContent =
+    opportunity.exceptionalCaveat ||
+    "A rare-opportunity alert does not replace the current recommendation.";
+
+  els.exceptionalOpportunityPanel.classList.remove(
+    "hidden"
+  );
+}
+
+function isExceptionalOpportunityApproaching(opportunity) {
+  return getExceptionalDecisionMinutes(opportunity) <= 45;
+}
+
+function getExceptionalDecisionMinutes(opportunity) {
+  if (!opportunity) return 999;
+
+  if (opportunity.liveRoute) {
+    return Number(
+      opportunity.decisionMinutes ??
+      opportunity.minutesAhead ??
+      999
+    );
+  }
+
+  return estimateMinutesAhead(opportunity);
+}
+
+function maybeDeliverExceptionalAlert(opportunity) {
+  if (
+    !state.started ||
+    !state.exceptionalAlerts ||
+    !opportunity ||
+    state.dismissedExceptionalIds.has(opportunity.id)
+  ) {
+    return;
+  }
+
+  const minutes = getExceptionalDecisionMinutes(
+    opportunity
+  );
+  let stage = "";
+
+  if (minutes <= 5) stage = "decision";
+  else if (minutes <= 45) stage = "opportunity";
+  else return;
+
+  const key = `${opportunity.id}:${stage}`;
+  if (state.announcedExceptionalKeys.has(key)) return;
+  state.announcedExceptionalKeys.add(key);
+
+  const added = Number(opportunity.added || 0);
+  const message =
+    stage === "decision"
+      ? `Rare detour decision now. ${opportunity.name} adds about ${added} minutes and cleared the exceptional-place threshold.`
+      : `Rare detour opportunity ahead. ${opportunity.name} adds about ${added} minutes and may be a bucket-list stop. Your normal recommendation remains unchanged.`;
+
+  if (state.voiceEnabled) {
+    speakMessage(message);
+  }
+
+  if (
+    state.notificationsEnabled &&
+    Notification.permission === "granted"
+  ) {
+    try {
+      new Notification(
+        stage === "decision"
+          ? "DetourEats: rare detour decision"
+          : "DetourEats: rare place ahead",
+        {
+          body: message,
+          icon: "icons/icon-192.svg",
+          tag: `exceptional-${key}`,
+          renotify: stage === "decision"
+        }
+      );
+    } catch {
+      // Some mobile browsers require service-worker notifications.
+    }
+  }
+
+  showToast(
+    stage === "decision"
+      ? "Rare detour decision"
+      : "Rare place ahead",
+    message
+  );
+}
+
+function navigateToExceptionalOpportunity() {
+  const opportunity = state.exceptionalOpportunity;
+  if (!opportunity) return;
+
+  state.pendingNavigationPick = opportunity;
+
+  if (state.navigationPreference === "google") {
+    launchNavigation("google");
+    return;
+  }
+
+  if (state.navigationPreference === "apple") {
+    launchNavigation("apple");
+    return;
+  }
+
+  openNavigationModal(opportunity);
+}
+
+function dismissExceptionalOpportunity() {
+  const opportunity = state.exceptionalOpportunity;
+  if (!opportunity) return;
+
+  state.dismissedExceptionalIds.add(opportunity.id);
+  els.exceptionalOpportunityPanel.classList.add(
+    "hidden"
+  );
+  showToast(
+    "Current plan kept",
+    `${opportunity.name} will not be announced again on this trip.`
+  );
+  render();
+}
+
 function updateTripAlertStatus() {
   const voiceLabel = state.voiceEnabled ? "Voice on" : "Voice off";
   const alertLabel = state.notificationsEnabled ? "alerts on" : "alerts off";
+  const exceptionalLabel = state.exceptionalAlerts
+    ? "rare scan on"
+    : "rare scan off";
 
   if (els.tripAlertStatusText) {
-    els.tripAlertStatusText.textContent = `${voiceLabel} · ${alertLabel}`;
+    els.tripAlertStatusText.textContent =
+      `${voiceLabel} · ${alertLabel} · ${exceptionalLabel}`;
   }
 
   if (els.voiceToggleButton) {
@@ -2766,6 +2990,14 @@ document.querySelectorAll("[data-skip-reason]").forEach(button => {
   button.addEventListener("click", () => applySkipReason(button.dataset.skipReason));
 });
 els.takeMeThereButton.addEventListener("click", takeMeThere);
+els.exceptionalNavigateButton.addEventListener(
+  "click",
+  navigateToExceptionalOpportunity
+);
+els.exceptionalDismissButton.addEventListener(
+  "click",
+  dismissExceptionalOpportunity
+);
 els.rateLastStopButton.addEventListener("click", openStopFeedback);
 els.closeFeedbackButton.addEventListener("click", closeStopFeedback);
 els.finishFeedbackButton.addEventListener("click", finishFeedback);
@@ -2802,7 +3034,8 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
   els.foodPreferenceInput,
   els.chainPolicyInput,
   els.pricePreferenceInput,
-  els.familyFriendlyInput
+  els.familyFriendlyInput,
+  els.exceptionalAlertsInput
 ].forEach(el => {
   if (!el) return;
   el.addEventListener("input", () => {
@@ -2811,7 +3044,11 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
   el.addEventListener("change", () => {
     savePreferences();
     if (
-      (el === els.maxAddedInput || el === els.tripModeInput) &&
+      (
+        el === els.maxAddedInput ||
+        el === els.tripModeInput ||
+        el === els.exceptionalAlertsInput
+      ) &&
       !state.started
     ) {
       invalidateRoutePreview();

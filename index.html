@@ -182,6 +182,14 @@
                 <small>Favor kid-friendly places with simpler access and parking.</small>
               </span>
             </label>
+
+            <label class="check-row exceptional-alert-setting">
+              <input id="exceptionalAlertsInput" type="checkbox" checked>
+              <span>
+                <strong>Always tell me about rare places</strong>
+                <small>Keep a quiet bucket-list scan running up to about 25 miles from the route, regardless of Eating Priority.</small>
+              </span>
+            </label>
           </div>
         </details>
 
@@ -279,6 +287,45 @@
             <strong id="tripAlertStatusText">Voice off · alerts off</strong>
           </div>
         </div>
+      </section>
+
+
+      <section id="exceptionalOpportunityPanel" class="exceptional-opportunity-panel hidden" aria-live="assertive">
+        <div class="exceptional-opportunity-top">
+          <div>
+            <span>Rare detour opportunity</span>
+            <strong id="exceptionalOpportunityName">Potential bucket-list stop</strong>
+          </div>
+          <div id="exceptionalOpportunityScore" class="exceptional-score">—</div>
+        </div>
+
+        <p id="exceptionalOpportunityMessage">
+          This is separate from your normal recommendation.
+        </p>
+
+        <div class="exceptional-facts">
+          <div>
+            <span>Added trip time</span>
+            <strong id="exceptionalOpportunityAdded">—</strong>
+          </div>
+          <div>
+            <span>Distance from route</span>
+            <strong id="exceptionalOpportunityOffset">—</strong>
+          </div>
+          <div>
+            <span>Evidence</span>
+            <strong id="exceptionalOpportunityEvidence">—</strong>
+          </div>
+        </div>
+
+        <div class="exceptional-opportunity-actions">
+          <button id="exceptionalNavigateButton" class="primary" type="button">Add Stop</button>
+          <button id="exceptionalDismissButton" class="secondary" type="button">Keep Current Plan</button>
+        </div>
+
+        <small id="exceptionalOpportunityCaveat">
+          A rare-opportunity alert does not replace the current recommendation.
+        </small>
       </section>
 
       <div id="decisionCard" class="decision-card"></div>

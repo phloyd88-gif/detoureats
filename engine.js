@@ -1,4 +1,4 @@
-/* DetourEats v1.6 Adaptive Detour Scoring Engine
+/* DetourEats v1.7 Exceptional Detour Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -29,6 +29,10 @@ It is restaurant quality filtered through trip fit.
 
     const urgency = calculateMealUrgency(settings);
     const routeContext = analyzeRouteScarcity(scored, settings);
+    const exceptionalOpportunity = findExceptionalOpportunity(
+      normalized,
+      settings
+    );
 
     let pick = chooseByChainPolicy(eligible, settings)[0] || null;
 
@@ -83,6 +87,7 @@ It is restaurant quality filtered through trip fit.
       routeContext,
       routeOutlook,
       nextAlternative,
+      exceptionalOpportunity,
       decision
     };
   }
@@ -126,6 +131,8 @@ It is restaurant quality filtered through trip fit.
       destinationEvidenceScore: number(c.destinationEvidenceScore, 0),
       destinationEvidenceLevel:
         c.destinationEvidenceLevel || "basic",
+      exceptionalScan: Boolean(c.exceptionalScan),
+      exceptionalOnly: Boolean(c.exceptionalOnly),
       backtracking: Boolean(c.backtracking),
       betterOptionMilesAhead: c.betterOptionMilesAhead ?? null,
       priceLevel: c.priceLevel ?? "$$",
@@ -152,6 +159,7 @@ It is restaurant quality filtered through trip fit.
     const chainPolicy = String(settings.chainPolicy || "avoid").toLowerCase();
 
     return candidates.filter(c => {
+      if (c.exceptionalOnly) return false;
       if (skippedIds.has(String(c.id))) return false;
       if (c.seq < routePosition) return false;
       if (c.seq > maxSeq) return false;
@@ -178,6 +186,150 @@ It is restaurant quality filtered through trip fit.
       }
       return true;
     });
+  }
+
+  function findExceptionalOpportunity(
+    candidates,
+    settings
+  ) {
+    if (settings.exceptionalAlerts === false) return null;
+
+    const routePosition = Math.max(
+      number(settings.routePosition, 0),
+      number(settings.deferUntilSeq, 0)
+    );
+    const skippedIds = new Set(
+      (settings.skippedIds || []).map(String)
+    );
+    const dismissedIds = new Set(
+      (settings.dismissedExceptionalIds || []).map(String)
+    );
+    const excludedCategories = (
+      settings.excludedCategories || []
+    ).map(value => String(value).toLowerCase());
+
+    const opportunities = candidates
+      .filter(candidate => {
+        if (skippedIds.has(String(candidate.id))) return false;
+        if (dismissedIds.has(String(candidate.id))) return false;
+        if (candidate.seq < routePosition) return false;
+        if (candidate.backtracking) return false;
+        if (candidate.openAtArrival === false) return false;
+        if (candidate.chain) return false;
+
+        const added = number(
+          candidate.estimatedAddedMinutes,
+          999
+        );
+        const offset = number(candidate.routeOffsetMiles, 0);
+        if (added > 45) return false;
+        if (offset > 27) return false;
+
+        const category = String(
+          candidate.category || ""
+        ).toLowerCase();
+        if (
+          excludedCategories.some(
+            excluded =>
+              category.includes(excluded) ||
+              excluded.includes(category)
+          )
+        ) {
+          return false;
+        }
+
+        const discovered =
+          candidate.provenance === "route-discovered" ||
+          candidate.discoverySource === "openstreetmap";
+
+        if (discovered) {
+          return Boolean(
+            candidate.destinationEvidenceLevel === "strong" &&
+            number(candidate.destinationEvidenceScore, 0) >= 10 &&
+            candidate.destinationWorthiness >= 84 &&
+            candidate.uniqueness >= 72 &&
+            candidate.foodReputation >= 76
+          );
+        }
+
+        return Boolean(
+          candidate.destinationWorthiness >= 92 &&
+          candidate.uniqueness >= 85 &&
+          candidate.foodReputation >= 88
+        );
+      })
+      .map(candidate => {
+        const restaurantQuality = clamp(
+          candidate.foodReputation * 0.38 +
+          candidate.destinationWorthiness * 0.24 +
+          candidate.uniqueness * 0.18 +
+          candidate.consistency * 0.12 +
+          candidate.reviewConfidence * 0.08
+        );
+
+        const discovered =
+          candidate.provenance === "route-discovered" ||
+          candidate.discoverySource === "openstreetmap";
+        const evidenceFit = discovered
+          ? clamp(
+              72 +
+              number(
+                candidate.destinationEvidenceScore,
+                0
+              ) * 2.5
+            )
+          : 98;
+        const added = number(
+          candidate.estimatedAddedMinutes,
+          0
+        );
+        const offset = number(
+          candidate.routeOffsetMiles,
+          0
+        );
+
+        const exceptionalScore = clamp(
+          restaurantQuality * 0.42 +
+          candidate.destinationWorthiness * 0.25 +
+          candidate.uniqueness * 0.15 +
+          evidenceFit * 0.18 -
+          Math.max(0, added - 15) * 0.22 -
+          Math.max(0, offset - 10) * 0.08
+        );
+
+        return {
+          ...candidate,
+          exceptionalScore: Math.round(exceptionalScore),
+          exceptionalEvidence:
+            discovered
+              ? "Strong available map evidence"
+              : "Curated destination evidence",
+          exceptionalReason:
+            discovered
+              ? "A strict independent scan found unusually strong destination signals for a place this far from the route."
+              : "Curated quality, uniqueness, and destination-worthiness all clear the bucket-list threshold.",
+          exceptionalCaveat:
+            discovered
+              ? "Potential bucket-list opportunity based on strong available map evidence. Food quality, reputation, and arrival hours are not independently verified."
+              : "Curated bucket-list opportunity. Arrival hours should still be confirmed."
+        };
+      })
+      .filter(candidate => candidate.exceptionalScore >= 86)
+      .sort((a, b) => {
+        const aMinutes = number(
+          a.decisionMinutes ?? a.minutesAhead,
+          a.seq * 45
+        );
+        const bMinutes = number(
+          b.decisionMinutes ?? b.minutesAhead,
+          b.seq * 45
+        );
+
+        if (aMinutes !== bMinutes) return aMinutes - bMinutes;
+        return b.exceptionalScore - a.exceptionalScore;
+      });
+
+    return opportunities[0] || null;
   }
 
   function scoreCandidate(c, settings, allCandidates) {

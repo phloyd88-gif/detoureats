@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.7 Beta
+- Added an always-on Exceptional Detour Override across every Eating Priority.
+- Added a strict 25-mile rare-place scan even when Eat Soon remains near the route.
+- Kept exceptional-only candidates out of the ordinary recommendation pool.
+- Added separate potential bucket-list qualification for discovered and curated restaurants.
+- Added a 45-minute maximum actual detour for exceptional-only evaluation.
+- Added early and decision-point exceptional voice and browser alerts.
+- Added a Rare Detour Opportunity card with Add Stop and Keep Current Plan actions.
+- Added per-trip dismissal so a rejected exceptional restaurant is not announced again.
+- Added a default-on preference for rare-place alerts.
+- Added explicit evidence caveats for route-discovered bucket-list candidates.
+
+
 ## v1.6 Beta
 - Replaced the fixed five-mile discovery boundary with adaptive practical, extended, and destination search tiers.
 - Added evidence-supported restaurant discovery up to about 15 miles from the route for Best Overall.

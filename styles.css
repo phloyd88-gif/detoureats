@@ -2311,3 +2311,130 @@ button:disabled {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+
+/* v1.7 Beta: exceptional detour override */
+.exceptional-alert-setting {
+  margin-top: 10px;
+  border-color: #d8b4fe;
+  background: #faf5ff;
+}
+.exceptional-alert-setting strong {
+  color: #6b21a8;
+}
+.exceptional-opportunity-panel {
+  margin: 14px 0;
+  padding: 17px;
+  border: 2px solid #c084fc;
+  border-radius: 21px;
+  background:
+    radial-gradient(
+      circle at top right,
+      rgba(233, 213, 255, 0.8),
+      transparent 42%
+    ),
+    #faf5ff;
+  box-shadow: 0 14px 34px rgba(107, 33, 168, 0.13);
+}
+.exceptional-opportunity-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.exceptional-opportunity-top div:first-child > span,
+.exceptional-opportunity-top div:first-child > strong {
+  display: block;
+}
+.exceptional-opportunity-top div:first-child > span {
+  color: #7e22ce;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.exceptional-opportunity-top div:first-child > strong {
+  margin-top: 4px;
+  color: #3b0764;
+  font-size: 18px;
+}
+.exceptional-score {
+  display: grid;
+  flex: 0 0 auto;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 2px solid #a855f7;
+  border-radius: 50%;
+  background: white;
+  color: #6b21a8;
+  font-size: 18px;
+  font-weight: 950;
+}
+.exceptional-opportunity-panel > p {
+  margin: 11px 0;
+  color: #581c87;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.exceptional-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.exceptional-facts > div {
+  padding: 9px 10px;
+  border: 1px solid #e9d5ff;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+}
+.exceptional-facts span,
+.exceptional-facts strong {
+  display: block;
+}
+.exceptional-facts span {
+  color: #7e22ce;
+  font-size: 8px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+.exceptional-facts strong {
+  margin-top: 3px;
+  color: #3b0764;
+  font-size: 11px;
+}
+.exceptional-opportunity-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+.exceptional-opportunity-actions button {
+  margin: 0;
+}
+.exceptional-opportunity-panel > small {
+  display: block;
+  margin-top: 9px;
+  color: #7e22ce;
+  font-size: 9px;
+  line-height: 1.35;
+}
+.adaptive-search-summary small {
+  display: block;
+  margin-top: 6px;
+  color: #6b21a8;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+@media (max-width: 560px) {
+  .exceptional-facts,
+  .exceptional-opportunity-actions {
+    grid-template-columns: 1fr;
+  }
+  .exceptional-score {
+    width: 48px;
+    height: 48px;
+    font-size: 16px;
+  }
+}
