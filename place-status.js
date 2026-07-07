@@ -1,0 +1,541 @@
+/* DetourEats v1.8.3 business status validation */
+(function () {
+  "use strict";
+
+  const LOCAL_SUPPRESSION_KEY =
+    "detoureats_local_place_suppressions_v1";
+  const STALE_NO_SIGNAL_DAYS = 6 * 365;
+  const MEDIUM_CONFIDENCE_DAYS = 3 * 365;
+
+  const KNOWN_STATUS_OVERRIDES = [
+    {
+      name: "shaker mill tavern",
+      city: "west stockbridge",
+      addressContains: "5 albany",
+      status: "closed",
+      verifiedAt: "2026-07-07",
+      reason:
+        "Confirmed former tavern listing. Shaker Mill Inn is a separate lodging business nearby, not this restaurant."
+    }
+  ];
+
+  function assessOsmElement(element) {
+    const tags = element?.tags || {};
+    const candidate = {
+      id: element?.type && element?.id
+        ? `osm-${element.type}-${element.id}`
+        : "",
+      name: String(tags.name || "").trim(),
+      city:
+        tags["addr:city"] ||
+        tags["addr:town"] ||
+        tags["addr:village"] ||
+        tags["addr:hamlet"] ||
+        "",
+      address: buildAddress(tags),
+      coordinates:
+        element?.type === "node"
+          ? [Number(element.lon), Number(element.lat)]
+          : [
+              Number(element?.center?.lon),
+              Number(element?.center?.lat)
+            ]
+    };
+
+    const localSuppression =
+      getSuppressionForCandidate(candidate);
+
+    if (localSuppression) {
+      return {
+        blocked: true,
+        status: "locally-suppressed",
+        confidence: "confirmed",
+        reasonCode: "local-report",
+        reason:
+          `Hidden after a local ${localSuppression.issueType} report.`,
+        lastCheckedAt: localSuppression.createdAt,
+        ageDays: 0,
+        signalCount: 0
+      };
+    }
+
+    const override =
+      matchKnownStatusOverride(candidate);
+
+    if (override?.status === "closed") {
+      return {
+        blocked: true,
+        status: "closed",
+        confidence: "confirmed",
+        reasonCode: "known-closed",
+        reason: override.reason,
+        lastCheckedAt: override.verifiedAt,
+        ageDays: 0,
+        signalCount: 0
+      };
+    }
+
+    const lifecycleReason =
+      getClosedLifecycleReason(tags);
+
+    if (lifecycleReason) {
+      const lastCheckedAt =
+        mostRecentOperationalDate(
+          tags,
+          element?.timestamp
+        );
+
+      return {
+        blocked: true,
+        status: "closed",
+        confidence: "high",
+        reasonCode: "osm-closed-tag",
+        reason: lifecycleReason,
+        lastCheckedAt,
+        ageDays: getAgeDays(lastCheckedAt),
+        signalCount: countSignals(tags)
+      };
+    }
+
+    const lastCheckedAt =
+      mostRecentOperationalDate(
+        tags,
+        element?.timestamp
+      );
+    const ageDays = getAgeDays(lastCheckedAt);
+    const signalCount = countSignals(tags);
+
+    if (
+      ageDays > STALE_NO_SIGNAL_DAYS &&
+      signalCount === 0
+    ) {
+      return {
+        blocked: true,
+        status: "stale-unverified",
+        confidence: "low",
+        reasonCode: "stale-no-signals",
+        reason:
+          "The restaurant record is more than six years old and has no mapped hours, phone, website, or recent operational check.",
+        lastCheckedAt,
+        ageDays,
+        signalCount
+      };
+    }
+
+    let status = "unverified";
+    let confidence = "low";
+    let reason =
+      "Current operation has not been independently confirmed.";
+
+    if (ageDays <= 730 && signalCount >= 1) {
+      status = "currently-mapped";
+      confidence = "high";
+      reason =
+        "The listing has recent map activity and at least one operating signal.";
+    } else if (
+      ageDays <= MEDIUM_CONFIDENCE_DAYS &&
+      signalCount >= 1
+    ) {
+      status = "currently-mapped";
+      confidence = "medium";
+      reason =
+        "The listing has reasonably recent map activity and operating metadata.";
+    } else if (signalCount >= 3) {
+      status = "operational-signals-present";
+      confidence = "medium";
+      reason =
+        "Multiple operating signals are mapped, but the record has not been checked recently.";
+    } else if (signalCount >= 1) {
+      status = "weakly-verified";
+      confidence = "low";
+      reason =
+        "Some operating metadata is present, but the listing may be stale.";
+    }
+
+    return {
+      blocked: false,
+      status,
+      confidence,
+      reasonCode: "allowed",
+      reason,
+      lastCheckedAt,
+      ageDays,
+      signalCount
+    };
+  }
+
+  function matchKnownStatusOverride(candidate) {
+    const name =
+      normalizeRestaurantName(candidate?.name);
+    const city =
+      normalizeText(candidate?.city);
+    const address =
+      normalizeText(candidate?.address);
+
+    return (
+      KNOWN_STATUS_OVERRIDES.find(item => {
+        if (
+          name !==
+          normalizeRestaurantName(item.name)
+        ) {
+          return false;
+        }
+
+        if (
+          item.city &&
+          !city.includes(
+            normalizeText(item.city)
+          )
+        ) {
+          return false;
+        }
+
+        if (
+          item.addressContains &&
+          address &&
+          !address.includes(
+            normalizeText(
+              item.addressContains
+            )
+          )
+        ) {
+          return false;
+        }
+
+        return true;
+      }) || null
+    );
+  }
+
+  function getClosedLifecycleReason(tags) {
+    const closedValues = [
+      ["disused", tags.disused],
+      ["abandoned", tags.abandoned],
+      ["demolished", tags.demolished],
+      ["removed", tags.removed],
+      ["closed", tags.closed],
+      ["disused:amenity", tags["disused:amenity"]],
+      ["abandoned:amenity", tags["abandoned:amenity"]],
+      ["demolished:amenity", tags["demolished:amenity"]]
+    ];
+
+    for (const [key, rawValue] of closedValues) {
+      const value =
+        String(rawValue || "").toLowerCase();
+
+      if (
+        [
+          "yes",
+          "true",
+          "restaurant",
+          "cafe",
+          "fast_food"
+        ].includes(value)
+      ) {
+        return `OpenStreetMap marks this feature as ${key}.`;
+      }
+    }
+
+    const hours =
+      String(tags.opening_hours || "").trim();
+
+    if (/^(closed|off)$/i.test(hours)) {
+      return "Published opening hours mark the place as closed.";
+    }
+
+    return "";
+  }
+
+  function countSignals(tags) {
+    return [
+      tags.opening_hours,
+      tags.phone,
+      tags["contact:phone"],
+      tags.website,
+      tags["contact:website"],
+      tags["contact:facebook"],
+      tags["contact:instagram"]
+    ].filter(value =>
+      String(value || "").trim()
+    ).length;
+  }
+
+  function mostRecentOperationalDate(
+    tags,
+    elementTimestamp
+  ) {
+    const dates = [
+      tags.check_date,
+      tags["check_date:opening_hours"],
+      tags["survey:date"],
+      tags["source:date"],
+      elementTimestamp
+    ]
+      .map(parseDate)
+      .filter(Boolean)
+      .sort(
+        (a, b) =>
+          b.getTime() - a.getTime()
+      );
+
+    return dates.length
+      ? dates[0].toISOString()
+      : "";
+  }
+
+  function getAgeDays(value) {
+    const date = parseDate(value);
+    if (!date) return 99999;
+
+    return Math.max(
+      0,
+      Math.floor(
+        (Date.now() - date.getTime()) /
+        86400000
+      )
+    );
+  }
+
+  function parseDate(value) {
+    const text =
+      String(value || "").trim();
+    if (!text) return null;
+
+    const date = new Date(text);
+    return Number.isFinite(date.getTime())
+      ? date
+      : null;
+  }
+
+  function buildAddress(tags) {
+    return [
+      tags["addr:housenumber"],
+      tags["addr:street"],
+      tags["addr:city"] ||
+        tags["addr:town"] ||
+        tags["addr:village"],
+      tags["addr:state"]
+    ]
+      .filter(Boolean)
+      .join(", ");
+  }
+
+  function suppressCandidate(
+    restaurant,
+    issueType,
+    notes = ""
+  ) {
+    if (!restaurant) return null;
+
+    const suppression = {
+      id:
+        String(
+          restaurant.id ||
+          restaurant.name ||
+          `suppression-${Date.now()}`
+        ),
+      name:
+        String(restaurant.name || ""),
+      normalizedName:
+        normalizeRestaurantName(
+          restaurant.name
+        ),
+      address:
+        String(restaurant.address || ""),
+      normalizedAddress:
+        normalizeText(
+          restaurant.address || ""
+        ),
+      coordinates:
+        Array.isArray(
+          restaurant.coordinates
+        )
+          ? restaurant.coordinates.map(Number)
+          : null,
+      issueType:
+        String(issueType || "other"),
+      notes:
+        String(notes || "").trim(),
+      createdAt:
+        new Date().toISOString()
+    };
+
+    const current =
+      getSuppressions().filter(
+        item =>
+          !suppressionMatches(
+            item,
+            restaurant
+          )
+      );
+
+    current.unshift(suppression);
+
+    try {
+      localStorage.setItem(
+        LOCAL_SUPPRESSION_KEY,
+        JSON.stringify(
+          current.slice(0, 200)
+        )
+      );
+    } catch {
+      // Best effort.
+    }
+
+    return suppression;
+  }
+
+  function getSuppressions() {
+    try {
+      const value = JSON.parse(
+        localStorage.getItem(
+          LOCAL_SUPPRESSION_KEY
+        ) || "[]"
+      );
+      return Array.isArray(value)
+        ? value
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function getSuppressionForCandidate(candidate) {
+    if (!candidate) return null;
+
+    return (
+      getSuppressions().find(item =>
+        suppressionMatches(
+          item,
+          candidate
+        )
+      ) || null
+    );
+  }
+
+  function suppressionMatches(
+    suppression,
+    candidate
+  ) {
+    if (
+      suppression.id &&
+      candidate.id &&
+      String(suppression.id) ===
+        String(candidate.id)
+    ) {
+      return true;
+    }
+
+    const sameName =
+      suppression.normalizedName &&
+      suppression.normalizedName ===
+        normalizeRestaurantName(
+          candidate.name
+        );
+
+    if (!sameName) return false;
+
+    const candidateAddress =
+      normalizeText(
+        candidate.address || ""
+      );
+
+    if (
+      suppression.normalizedAddress &&
+      candidateAddress &&
+      suppression.normalizedAddress ===
+        candidateAddress
+    ) {
+      return true;
+    }
+
+    if (
+      Array.isArray(
+        suppression.coordinates
+      ) &&
+      Array.isArray(
+        candidate.coordinates
+      )
+    ) {
+      return (
+        distanceMeters(
+          suppression.coordinates,
+          candidate.coordinates
+        ) <= 500
+      );
+    }
+
+    return false;
+  }
+
+  function clearSuppressions() {
+    try {
+      localStorage.removeItem(
+        LOCAL_SUPPRESSION_KEY
+      );
+    } catch {
+      // Best effort.
+    }
+  }
+
+  function distanceMeters(a, b) {
+    const lon1 =
+      Number(a?.[0]) * Math.PI / 180;
+    const lat1 =
+      Number(a?.[1]) * Math.PI / 180;
+    const lon2 =
+      Number(b?.[0]) * Math.PI / 180;
+    const lat2 =
+      Number(b?.[1]) * Math.PI / 180;
+    const dLon = lon2 - lon1;
+    const dLat = lat2 - lat1;
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1) *
+        Math.cos(lat2) *
+        Math.sin(dLon / 2) ** 2;
+
+    return (
+      6371000 *
+      2 *
+      Math.atan2(
+        Math.sqrt(h),
+        Math.sqrt(1 - h)
+      )
+    );
+  }
+
+  function normalizeRestaurantName(value) {
+    return normalizeText(value)
+      .replace(
+        /\b(the|restaurant|cafe|café)\b/g,
+        " "
+      )
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  window.DetourEatsPlaceStatus = {
+    assessOsmElement,
+    matchKnownStatusOverride,
+    suppressCandidate,
+    getSuppressions,
+    getSuppressionForCandidate,
+    clearSuppressions,
+    __test: {
+      getAgeDays,
+      countSignals,
+      getClosedLifecycleReason
+    }
+  };
+})();
