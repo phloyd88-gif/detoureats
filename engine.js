@@ -22,14 +22,19 @@ It is restaurant quality filtered through trip fit.
       .map(candidate => scoreCandidate(candidate, settings, normalized))
       .sort((a, b) => b.detourScore - a.detourScore);
 
+    const minimumScore = number(settings.minimumScore, 0);
+    const eligible = minimumScore > 0
+      ? scored.filter(candidate => candidate.detourScore >= minimumScore)
+      : scored;
+
     const urgency = calculateMealUrgency(settings);
     const routeContext = analyzeRouteScarcity(scored, settings);
 
-    let pick = scored[0] || null;
+    let pick = chooseByChainPolicy(eligible, settings)[0] || null;
 
     const style = String(settings.tripMode || "balanced").toLowerCase();
     if (style.includes("hungry")) {
-      const earliestGoodEnough = scored
+      const earliestGoodEnough = chooseByChainPolicy(eligible, settings)
         .filter(c =>
           c.openAtArrival !== false &&
           c.restaurantQuality >= 72 &&
@@ -49,7 +54,7 @@ It is restaurant quality filtered through trip fit.
 
     return {
       pick,
-      upcoming: scored.slice(0, 6),
+      upcoming: chooseByChainPolicy(eligible.length ? eligible : scored, settings).slice(0, 6),
       evaluated: scored,
       explanation: pick ? pick.scoreExplanation : null,
       reason: pick ? "recommended" : "no_candidate_available",
@@ -86,21 +91,46 @@ It is restaurant quality filtered through trip fit.
       arrivalClock: c.arrivalClock ?? c.arrivalTime ?? c.eta ?? "",
       openAtArrival: c.openAtArrival ?? c.isOpen ?? true,
       backtracking: Boolean(c.backtracking),
-      betterOptionMilesAhead: c.betterOptionMilesAhead ?? null
+      betterOptionMilesAhead: c.betterOptionMilesAhead ?? null,
+      priceLevel: c.priceLevel ?? "$$",
+      quickStop: Boolean(c.quickStop),
+      sitDown: c.sitDown !== false,
+      localFavorite: c.localFavorite !== false,
+      regionalSpecialty: Boolean(c.regionalSpecialty),
+      kidFriendly: Boolean(c.kidFriendly),
+      easyParking: Boolean(c.easyParking)
     };
   }
 
   function filterCandidates(candidates, settings) {
-    const routePosition = number(settings.routePosition, 0);
+    const routePosition = Math.max(
+      number(settings.routePosition, 0),
+      number(settings.deferUntilSeq, 0)
+    );
     const lookahead = number(settings.lookahead, 5);
     const maxSeq = lookahead >= 99 ? Infinity : routePosition + lookahead;
+    const skippedIds = new Set((settings.skippedIds || []).map(String));
+    const excludedCategories = (settings.excludedCategories || []).map(value => String(value).toLowerCase());
+    const stopType = String(settings.stopType || "either").toLowerCase();
+    const pricePreference = String(settings.pricePreference || "any").toLowerCase();
+    const chainPolicy = String(settings.chainPolicy || "avoid").toLowerCase();
 
     return candidates.filter(c => {
+      if (skippedIds.has(String(c.id))) return false;
       if (c.seq < routePosition) return false;
       if (c.seq > maxSeq) return false;
-      if (settings.hideChains !== false && c.chain) return false;
+      if (chainPolicy === "avoid" && c.chain) return false;
       if (c.backtracking) return false;
       if (settings.hoursMode !== "warnOnly" && c.openAtArrival === false) return false;
+      if (stopType === "quick" && !c.quickStop) return false;
+      if (stopType === "sitdown" && !c.sitDown) return false;
+      if (pricePreference === "budget" && c.priceLevel !== "$") return false;
+
+      const category = String(c.category || "").toLowerCase();
+      if (excludedCategories.some(excluded => category.includes(excluded) || excluded.includes(category))) {
+        return false;
+      }
+
       if (settings.candidatePool && settings.candidatePool !== "All") {
         const haystack = [
           c.category,
@@ -130,6 +160,8 @@ It is restaurant quality filtered through trip fit.
     const chainFit = c.chain ? 55 : 100;
     const backtrackFit = c.backtracking ? 0 : 100;
     const scarcityFit = scoreScarcity(c, allCandidates, settings);
+    const preference = scorePreferences(c, settings);
+    const preferenceFit = preference.score;
 
     const style = String(settings.tripMode || "balanced").toLowerCase();
     const distanceAhead = Math.max(0, c.seq - number(settings.routePosition, 0));
@@ -159,7 +191,7 @@ It is restaurant quality filtered through trip fit.
       if (distanceAhead >= 4) {
         detourScore -= Math.min(14, (distanceAhead - 3) * 4);
       }
-    } else if (style.includes("adventure") || style.includes("food")) {
+    } else if (style.includes("adventure") || style.includes("food") || style.includes("strict")) {
       tripFit = clamp(
         timeFit * 0.24 +
         openFit * 0.16 +
@@ -190,6 +222,10 @@ It is restaurant quality filtered through trip fit.
       );
     }
 
+    // Preferences can meaningfully reorder otherwise similar stops without
+    // making a weak restaurant look elite.
+    detourScore += (preferenceFit - 75) * 0.18;
+
     if (restaurantQuality >= 74 && scarcityFit >= 88) {
       detourScore = Math.max(detourScore, style.includes("hungry") ? 86 : 84);
     }
@@ -211,6 +247,8 @@ It is restaurant quality filtered through trip fit.
       timeFit: Math.round(timeFit),
       scarcityFit: Math.round(scarcityFit),
       urgencyFit: Math.round(urgencyFit),
+      preferenceFit: Math.round(preferenceFit),
+      preferenceReasons: preference.reasons,
       style,
       detourScore,
       tier,
@@ -228,9 +266,69 @@ It is restaurant quality filtered through trip fit.
       timeFit: Math.round(timeFit),
       scarcityFit: Math.round(scarcityFit),
       urgencyFit: Math.round(urgencyFit),
+      preferenceFit: Math.round(preferenceFit),
       styleApplied: style,
       scoreExplanation
     };
+  }
+
+  function chooseByChainPolicy(scored, settings) {
+    const policy = String(settings.chainPolicy || "avoid").toLowerCase();
+    if (policy !== "fallback") return scored;
+
+    const independent = scored.filter(candidate => !candidate.chain);
+    return independent.length ? independent : scored;
+  }
+
+  function scorePreferences(candidate, settings) {
+    const stopType = String(settings.stopType || "either").toLowerCase();
+    const foodPreference = String(settings.foodPreference || "anything").toLowerCase();
+    const pricePreference = String(settings.pricePreference || "any").toLowerCase();
+    const familyFriendly = Boolean(settings.familyFriendly);
+    const reasons = [];
+    const parts = [];
+
+    if (stopType === "quick") {
+      parts.push(candidate.quickStop ? 100 : 35);
+      if (candidate.quickStop) reasons.push("Matches your quick-stop preference.");
+    } else if (stopType === "sitdown") {
+      parts.push(candidate.sitDown ? 100 : 35);
+      if (candidate.sitDown) reasons.push("Matches your sit-down preference.");
+    } else {
+      parts.push(82);
+    }
+
+    if (foodPreference === "local") {
+      parts.push(candidate.localFavorite ? 100 : 60);
+      if (candidate.localFavorite) reasons.push("Strong local-favorite fit.");
+    } else if (foodPreference === "regional") {
+      parts.push(candidate.regionalSpecialty ? 100 : 55);
+      if (candidate.regionalSpecialty) reasons.push("Matches your regional-specialty preference.");
+    } else {
+      parts.push(82);
+    }
+
+    if (pricePreference === "budget") {
+      parts.push(candidate.priceLevel === "$" ? 100 : 45);
+      if (candidate.priceLevel === "$") reasons.push("Fits your inexpensive-stop preference.");
+    } else {
+      parts.push(82);
+    }
+
+    if (familyFriendly) {
+      const familyScore =
+        (candidate.kidFriendly ? 55 : 20) +
+        (candidate.easyParking ? 45 : 15);
+      parts.push(familyScore);
+      if (candidate.kidFriendly && candidate.easyParking) {
+        reasons.push("Fits your easy family-stop preference.");
+      } else if (candidate.kidFriendly) {
+        reasons.push("Kid-friendly, though access may be less convenient.");
+      }
+    }
+
+    const score = parts.reduce((sum, value) => sum + value, 0) / parts.length;
+    return { score: clamp(score), reasons };
   }
 
   function scoreAddedTime(added, maxAdded) {
@@ -267,7 +365,7 @@ It is restaurant quality filtered through trip fit.
       return 35;
     }
 
-    if (style.includes("adventure") || style.includes("food")) {
+    if (style.includes("adventure") || style.includes("food") || style.includes("strict")) {
       if (distanceAhead <= 2) return 78;
       if (distanceAhead <= 5) return 92;
       return 84;
@@ -281,6 +379,7 @@ It is restaurant quality filtered through trip fit.
   function calculateMealUrgency(settings) {
     const currentTime = number(settings.currentTime, 720);
     const mealType = String(settings.mealType || "").toLowerCase();
+    const style = String(settings.tripMode || "balanced").toLowerCase();
 
     let level = "No rush";
     let score = 35;
@@ -334,7 +433,31 @@ It is restaurant quality filtered through trip fit.
       explanation = "You are in a common dinner period.";
     }
 
-    return { level, score, explanation };
+    // The user's selected trip style is an explicit preference signal.
+    // Hungry Soon must never conflict with a low clock-based urgency label.
+    if (style.includes("hungry")) {
+      if (level === "No rush" || level === "Start looking") {
+        level = "Eat soon";
+        score = Math.max(score, 88);
+        explanation = "Hungry Soon mode tells DetourEats to prioritize stopping earlier.";
+      } else {
+        score = Math.max(score, 88);
+        explanation = `${explanation} Hungry Soon mode reinforces an earlier stop.`;
+      }
+    }
+
+    // Food Adventure is more willing to wait unless the clock already says Stop now.
+    if ((style.includes("adventure") || style.includes("food") || style.includes("strict")) && level !== "Stop now") {
+      if (level === "Eat soon") {
+        level = "Start looking";
+        score = Math.min(score, 68);
+        explanation = "Food Adventure mode is willing to wait for a stronger destination stop.";
+      } else if (level === "No rush") {
+        explanation = "Food Adventure mode can wait for a stronger destination stop.";
+      }
+    }
+
+    return { level, score, explanation, styleApplied: style };
   }
 
   function analyzeRouteScarcity(scored, settings) {
@@ -472,6 +595,7 @@ It is restaurant quality filtered through trip fit.
     if (s.style.includes("hungry")) bullets.push("Hungry Soon mode favors an earlier acceptable stop.");
     else if (s.style.includes("adventure") || s.style.includes("food")) bullets.push("Food Adventure mode is willing to wait for a stronger destination stop.");
     else bullets.push("Balanced mode weighs food quality and trip cost together.");
+    (s.preferenceReasons || []).forEach(reason => bullets.push(reason));
     if (c.famousFor) bullets.push(`Known for: ${c.famousFor}.`);
 
     return {
@@ -480,6 +604,8 @@ It is restaurant quality filtered through trip fit.
       timeFit: s.timeFit,
       scarcityFit: s.scarcityFit,
       urgencyFit: s.urgencyFit,
+      preferenceFit: s.preferenceFit,
+      preferenceReasons: s.preferenceReasons,
       style: s.style,
       detourScore: s.detourScore,
       tier: s.tier.tier,

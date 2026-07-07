@@ -1,4 +1,4 @@
-# DetourEats App v0.6
+# DetourEats App v0.7
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -182,3 +182,30 @@ Added:
   - eat soon
   - stop now
 - Trip-context panel showing urgency and route outlook
+
+
+## v0.6.1: Urgency consistency fix
+
+- Hungry Soon now forces meal urgency to at least Eat Soon.
+- Food Adventure can reduce urgency when the user is willing to wait for a stronger stop.
+- Trip Context now shows which style was applied.
+
+
+## v0.7: Preferences and adaptive skipping
+
+Optional trip preferences:
+- Quick stop, sit-down meal, or either
+- Anything good, local favorite, or regional specialty
+- Avoid chains, chains as fallback, or allow all
+- Inexpensive-stop preference
+- Easy family-stop preference
+
+Skip now asks why and changes the next decision:
+- Too far tightens the detour limit
+- Not hungry yet pushes recommendations later
+- Wrong cuisine excludes that cuisine
+- Too expensive enables budget mode
+- Need something faster prioritizes quick stops
+- Show me something better raises the minimum Detour Score
+
+The Trip Context panel shows active preferences and the latest adjustment.

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.7
+- Added optional trip preferences.
+- Added preference-fit scoring and explanations.
+- Added reason-based skipping that changes subsequent recommendations.
+- Added cuisine exclusion, budget mode, quick-stop mode, defer logic, and a raised quality bar.
+- Added active-preference and latest-adjustment details to Trip Context.
+- Fixed Food Adventure so its style value is handled consistently.
+
+
+## v0.6.1
+- Fixed Hungry Soon showing No rush.
+- User-selected style now directly influences meal urgency.
+- Added Style applied to the Trip Context panel.
+
+
 ## v0.6
 - Added meal urgency states.
 - Added route-scarcity analysis.

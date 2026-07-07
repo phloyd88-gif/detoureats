@@ -8,6 +8,11 @@ const els = {
   destinationInput: document.getElementById("destinationInput"),
   maxAddedInput: document.getElementById("maxAddedInput"),
   tripModeInput: document.getElementById("tripModeInput"),
+  stopTypeInput: document.getElementById("stopTypeInput"),
+  foodPreferenceInput: document.getElementById("foodPreferenceInput"),
+  chainPolicyInput: document.getElementById("chainPolicyInput"),
+  pricePreferenceInput: document.getElementById("pricePreferenceInput"),
+  familyFriendlyInput: document.getElementById("familyFriendlyInput"),
   currentTimeInput: document.getElementById("currentTimeInput"),
   startTripButton: document.getElementById("startTripButton"),
   enableNotificationsButton: document.getElementById("enableNotificationsButton"),
@@ -18,6 +23,8 @@ const els = {
   detailsPanel: document.getElementById("detailsPanel"),
   takeMeThereButton: document.getElementById("takeMeThereButton"),
   skipButton: document.getElementById("skipButton"),
+  skipReasonPanel: document.getElementById("skipReasonPanel"),
+  closeSkipPanelButton: document.getElementById("closeSkipPanelButton"),
   routePositionInput: document.getElementById("routePositionInput"),
   routePositionLabel: document.getElementById("routePositionLabel"),
   lookaheadInput: document.getElementById("lookaheadInput"),
@@ -34,6 +41,15 @@ let state = {
   destination: "Myrtle Beach, SC",
   maxAdded: 10,
   tripMode: "balanced",
+  stopType: "either",
+  foodPreference: "anything",
+  chainPolicy: "avoid",
+  pricePreference: "any",
+  familyFriendly: false,
+  excludedCategories: new Set(),
+  deferUntilSeq: 0,
+  minimumScore: 0,
+  lastSkipAdjustment: "",
   currentTime: 480,
   routePosition: 0,
   lookahead: 5,
@@ -64,6 +80,15 @@ function getEngineResult() {
     candidatePool: state.candidatePool,
     hoursMode: state.hoursMode,
     tripMode: state.tripMode,
+    stopType: state.stopType,
+    foodPreference: state.foodPreference,
+    chainPolicy: state.chainPolicy,
+    pricePreference: state.pricePreference,
+    familyFriendly: state.familyFriendly,
+    excludedCategories: Array.from(state.excludedCategories),
+    deferUntilSeq: state.deferUntilSeq,
+    minimumScore: state.minimumScore,
+    skippedIds: Array.from(state.skippedIds),
     travelDay: "saturday",
     corridor: "All",
     hideChains: true,
@@ -323,11 +348,6 @@ function render() {
   state.currentPick = pick;
   state.currentResult = result;
 
-  if (!pick) {
-    const fallback = getFallbackUpcoming(null)[0];
-    if (fallback) pick = fallback;
-  }
-
   const trip = getTripState(pick, result);
   const copy = getRecommendationCopy(pick, trip);
 
@@ -412,6 +432,7 @@ function renderDetailsPanel(pick, trip, copy) {
       <div><strong>${explanation.timeFit}</strong><span>Time</span></div>
       <div><strong>${explanation.scarcityFit}</strong><span>Scarcity</span></div>
       <div><strong>${explanation.urgencyFit ?? "—"}</strong><span>Urgency</span></div>
+      <div><strong>${explanation.preferenceFit ?? "—"}</strong><span>Preference</span></div>
     </div>
   ` : "";
 
@@ -448,8 +469,11 @@ function renderDetailsPanel(pick, trip, copy) {
       <div class="context-grid">
         <div><span>Meal urgency</span><strong>${escapeHtml(state.currentResult?.urgency?.level || "No rush")}</strong></div>
         <div><span>Route outlook</span><strong>${escapeHtml(state.currentResult?.routeContext?.level || "Unknown")}</strong></div>
+        <div><span>Style applied</span><strong>${escapeHtml(formatPreferenceLabel(state.tripMode))}</strong></div>
+        <div><span>Preferences</span><strong>${escapeHtml(getPreferenceSummary())}</strong></div>
       </div>
       <p>${escapeHtml(state.currentResult?.routeContext?.message || "")}</p>
+      ${state.lastSkipAdjustment ? `<p class="adjustment-note"><strong>Adjusted:</strong> ${escapeHtml(state.lastSkipAdjustment)}</p>` : ""}
     </div>
 
     <div class="editorial-section">
@@ -497,6 +521,40 @@ function describeRoutePosition() {
   return "Late trip";
 }
 
+function formatPreferenceLabel(value) {
+  const labels = {
+    balanced: "Balanced",
+    adventure: "Food adventure",
+    strict: "Food adventure",
+    hungry: "Hungry soon",
+    either: "Either",
+    quick: "Quick stop",
+    sitdown: "Sit-down",
+    anything: "Anything good",
+    local: "Local favorite",
+    regional: "Regional specialty",
+    avoid: "Avoid chains",
+    fallback: "Chains as fallback",
+    allow: "Allow chains",
+    any: "Any price",
+    budget: "Inexpensive"
+  };
+  return labels[String(value)] || String(value || "");
+}
+
+function getPreferenceSummary() {
+  const parts = [
+    formatPreferenceLabel(state.stopType),
+    formatPreferenceLabel(state.foodPreference),
+    formatPreferenceLabel(state.chainPolicy)
+  ];
+
+  if (state.pricePreference === "budget") parts.push("Inexpensive");
+  if (state.familyFriendly) parts.push("Family-friendly");
+
+  return parts.join(" · ");
+}
+
 function showToast(title, message) {
   if (!els.toast) return;
   els.toast.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span>`;
@@ -509,6 +567,15 @@ function startTrip() {
   state.destination = els.destinationInput.value || "your destination";
   state.maxAdded = Number(els.maxAddedInput.value);
   state.tripMode = els.tripModeInput.value;
+  state.stopType = els.stopTypeInput?.value || "either";
+  state.foodPreference = els.foodPreferenceInput?.value || "anything";
+  state.chainPolicy = els.chainPolicyInput?.value || "avoid";
+  state.pricePreference = els.pricePreferenceInput?.value || "any";
+  state.familyFriendly = Boolean(els.familyFriendlyInput?.checked);
+  state.excludedCategories = new Set();
+  state.deferUntilSeq = 0;
+  state.minimumScore = 0;
+  state.lastSkipAdjustment = "";
   state.currentTime = Number(els.currentTimeInput.value);
   state.routePosition = Number(els.routePositionInput?.value || 0);
   state.lookahead = Number(els.lookaheadInput?.value || 5);
@@ -530,10 +597,68 @@ function goBack() {
 }
 
 function skipPick() {
-  if (state.currentPick) {
-    state.skippedIds.add(state.currentPick.id);
-    showToast("Skipped", "We’ll look for the next best option.");
+  if (!state.currentPick) return;
+  els.skipReasonPanel?.classList.toggle("hidden");
+}
+
+function closeSkipPanel() {
+  els.skipReasonPanel?.classList.add("hidden");
+}
+
+function applySkipReason(reason) {
+  const pick = state.currentPick;
+  if (!pick) return;
+
+  state.skippedIds.add(pick.id);
+
+  switch (reason) {
+    case "too-far":
+      state.maxAdded = Math.max(5, Math.min(state.maxAdded, pick.added - 1, state.maxAdded - 5));
+      state.lastSkipAdjustment = `Maximum detour tightened to ${state.maxAdded} minutes.`;
+      showToast("Detour tightened", state.lastSkipAdjustment);
+      break;
+
+    case "not-hungry":
+      state.deferUntilSeq = Math.max(state.deferUntilSeq, Number(pick.seq || state.routePosition) + 2);
+      state.lastSkipAdjustment = "Recommendations pushed farther down the route.";
+      showToast("We’ll wait", state.lastSkipAdjustment);
+      break;
+
+    case "wrong-cuisine": {
+      const cuisine = String(pick.category || "").trim();
+      if (cuisine) state.excludedCategories.add(cuisine.toLowerCase());
+      state.lastSkipAdjustment = cuisine
+        ? `${cuisine} excluded for the rest of this trip.`
+        : "That cuisine was excluded for this trip.";
+      showToast("Cuisine adjusted", state.lastSkipAdjustment);
+      break;
+    }
+
+    case "too-expensive":
+      state.pricePreference = "budget";
+      state.lastSkipAdjustment = "Now prioritizing inexpensive stops.";
+      showToast("Budget mode applied", state.lastSkipAdjustment);
+      break;
+
+    case "need-faster":
+      state.stopType = "quick";
+      state.maxAdded = Math.min(state.maxAdded, 10);
+      state.lastSkipAdjustment = "Now prioritizing quick stops within 10 minutes.";
+      showToast("Faster stops only", state.lastSkipAdjustment);
+      break;
+
+    case "show-better":
+      state.minimumScore = Math.min(99, Math.max(state.minimumScore, Number(pick.score || 0) + 3));
+      state.lastSkipAdjustment = `Next stop must score at least ${state.minimumScore}.`;
+      showToast("Quality bar raised", state.lastSkipAdjustment);
+      break;
+
+    default:
+      state.lastSkipAdjustment = "That stop was removed from this trip.";
+      showToast("Skipped", "We’ll look for the next best option.");
   }
+
+  closeSkipPanel();
   render();
 }
 
@@ -600,6 +725,10 @@ function registerServiceWorker() {
 els.startTripButton.addEventListener("click", startTrip);
 els.backButton.addEventListener("click", goBack);
 els.skipButton.addEventListener("click", skipPick);
+els.closeSkipPanelButton?.addEventListener("click", closeSkipPanel);
+document.querySelectorAll("[data-skip-reason]").forEach(button => {
+  button.addEventListener("click", () => applySkipReason(button.dataset.skipReason));
+});
 els.takeMeThereButton.addEventListener("click", takeMeThere);
 els.enableNotificationsButton.addEventListener("click", enableNotifications);
 els.demoToggleButton.addEventListener("click", toggleDemoControls);
@@ -611,7 +740,12 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
   els.hoursModeInput,
   els.currentTimeInput,
   els.maxAddedInput,
-  els.tripModeInput
+  els.tripModeInput,
+  els.stopTypeInput,
+  els.foodPreferenceInput,
+  els.chainPolicyInput,
+  els.pricePreferenceInput,
+  els.familyFriendlyInput
 ].forEach(el => {
   if (!el) return;
   el.addEventListener("input", () => {

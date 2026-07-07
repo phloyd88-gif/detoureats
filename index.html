@@ -50,11 +50,63 @@
             Style
             <select id="tripModeInput">
               <option value="balanced" selected>Balanced</option>
-              <option value="strict">Only the great stuff</option>
+              <option value="adventure">Food adventure</option>
               <option value="hungry">Hungry soon</option>
             </select>
           </label>
         </div>
+
+
+        <details class="preferences-panel">
+          <summary>Trip preferences <span>Optional</span></summary>
+
+          <div class="preferences-body">
+            <div class="field-grid">
+              <label>
+                Stop type
+                <select id="stopTypeInput">
+                  <option value="either" selected>Either</option>
+                  <option value="quick">Quick stop</option>
+                  <option value="sitdown">Sit-down meal</option>
+                </select>
+              </label>
+
+              <label>
+                Food priority
+                <select id="foodPreferenceInput">
+                  <option value="anything" selected>Anything good</option>
+                  <option value="local">Local favorite</option>
+                  <option value="regional">Regional specialty</option>
+                </select>
+              </label>
+
+              <label>
+                Chains
+                <select id="chainPolicyInput">
+                  <option value="avoid" selected>Avoid chains</option>
+                  <option value="fallback">Chains only as fallback</option>
+                  <option value="allow">Allow all</option>
+                </select>
+              </label>
+
+              <label>
+                Price
+                <select id="pricePreferenceInput">
+                  <option value="any" selected>No preference</option>
+                  <option value="budget">Keep it inexpensive</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="check-row">
+              <input id="familyFriendlyInput" type="checkbox">
+              <span>
+                <strong>Easy family stop</strong>
+                <small>Favor kid-friendly places with simpler access and parking.</small>
+              </span>
+            </label>
+          </div>
+        </details>
 
         <label class="advanced-time">
           Demo current time
@@ -101,6 +153,26 @@
         <button id="takeMeThereButton" class="primary">Take Me There</button>
         <button id="skipButton" class="secondary">Skip</button>
       </div>
+
+
+      <section id="skipReasonPanel" class="skip-reason-panel hidden" aria-live="polite">
+        <div class="skip-sheet-header">
+          <div>
+            <strong>Why skip this one?</strong>
+            <span>We’ll adjust the next recommendation.</span>
+          </div>
+          <button id="closeSkipPanelButton" class="skip-close" type="button" aria-label="Close">×</button>
+        </div>
+
+        <div class="skip-reason-grid">
+          <button type="button" data-skip-reason="too-far">Too far</button>
+          <button type="button" data-skip-reason="not-hungry">Not hungry yet</button>
+          <button type="button" data-skip-reason="wrong-cuisine">Wrong cuisine</button>
+          <button type="button" data-skip-reason="too-expensive">Too expensive</button>
+          <button type="button" data-skip-reason="need-faster">Need something faster</button>
+          <button type="button" data-skip-reason="show-better">Show me something better</button>
+        </div>
+      </section>
 
       <section id="detailsPanel" class="panel details-panel"></section>
 
