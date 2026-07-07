@@ -1,4 +1,4 @@
-/* DetourEats v0.4 Scoring Engine
+/* DetourEats v1.6 Adaptive Detour Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -121,6 +121,11 @@ It is restaurant quality filtered through trip fit.
       provenance: c.provenance || "curated",
       discoverySource: c.discoverySource || null,
       discoveryConfidence: c.discoveryConfidence || null,
+      routeOffsetMiles: number(c.routeOffsetMiles, 0),
+      detourTier: c.detourTier || "practical",
+      destinationEvidenceScore: number(c.destinationEvidenceScore, 0),
+      destinationEvidenceLevel:
+        c.destinationEvidenceLevel || "basic",
       backtracking: Boolean(c.backtracking),
       betterOptionMilesAhead: c.betterOptionMilesAhead ?? null,
       priceLevel: c.priceLevel ?? "$$",
@@ -260,6 +265,15 @@ It is restaurant quality filtered through trip fit.
     // making a weak restaurant look elite.
     detourScore += (preferenceFit - 75) * 0.18;
 
+    const detourGate = scoreAdaptiveDetourGate(
+      c,
+      restaurantQuality,
+      style,
+      maxAdded
+    );
+    detourScore += detourGate.adjustment;
+    detourScore = Math.min(detourScore, detourGate.cap);
+
     if (restaurantQuality >= 74 && scarcityFit >= 88) {
       detourScore = Math.max(detourScore, style.includes("hungry") ? 86 : 84);
     }
@@ -272,15 +286,36 @@ It is restaurant quality filtered through trip fit.
       detourScore = Math.min(detourScore, 82);
     }
 
-    // Route-discovered places have useful location data but incomplete
-    // editorial quality and hours verification. They cannot receive elite
-    // scores until stronger evidence is available.
+    // Route-discovered places have useful route and map evidence but do
+    // not have independent DetourEats food reviews. Wider candidates can
+    // earn a higher provisional ceiling only when destination evidence is
+    // materially stronger.
     if (
       c.provenance === "route-discovered" ||
       c.discoverySource === "openstreetmap"
     ) {
-      const discoveryCap =
+      let discoveryCap =
         c.discoveryConfidence === "medium" ? 86 : 81;
+
+      if (
+        c.destinationEvidenceLevel === "strong" &&
+        c.detourTier === "extended"
+      ) {
+        discoveryCap = style.includes("hungry") ? 82 : 88;
+      }
+
+      if (
+        c.destinationEvidenceLevel === "strong" &&
+        c.detourTier === "destination"
+      ) {
+        discoveryCap =
+          style.includes("adventure") ||
+          style.includes("food") ||
+          style.includes("strict")
+            ? 90
+            : 86;
+      }
+
       detourScore = Math.min(detourScore, discoveryCap);
     }
 
@@ -298,7 +333,8 @@ It is restaurant quality filtered through trip fit.
       style,
       detourScore,
       tier,
-      maxAdded
+      maxAdded,
+      detourGate
     });
 
     return {
@@ -453,6 +489,93 @@ It is restaurant quality filtered through trip fit.
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, " ")
       .trim();
+  }
+
+  function scoreAdaptiveDetourGate(
+    candidate,
+    restaurantQuality,
+    style,
+    maxAdded
+  ) {
+    const added = number(candidate.estimatedAddedMinutes, 0);
+    const offset = number(candidate.routeOffsetMiles, 0);
+    const evidence = number(candidate.destinationEvidenceScore, 0);
+    const isDiscovered =
+      candidate.provenance === "route-discovered" ||
+      candidate.discoverySource === "openstreetmap";
+    const adventure =
+      style.includes("adventure") ||
+      style.includes("food") ||
+      style.includes("strict");
+    const hungry = style.includes("hungry");
+
+    let requiredQuality = 70;
+    let cap = 100;
+    let adjustment = 0;
+    let label = "Practical detour";
+
+    if (added > maxAdded || offset > 5) {
+      requiredQuality = 78;
+      label = "Extended detour";
+    }
+    if (added > 20 || offset > 15) {
+      requiredQuality = 84;
+      label = "Destination-level detour";
+    }
+    if (added > 35 || offset > 22) {
+      requiredQuality = 90;
+      label = "Rare destination detour";
+    }
+    if (added > 50) {
+      requiredQuality = 94;
+      label = "Exceptional detour only";
+    }
+
+    if (hungry && (added > maxAdded + 8 || offset > 8)) {
+      cap = Math.min(cap, 76);
+      adjustment -= 12;
+    }
+
+    const qualityShortfall = Math.max(
+      0,
+      requiredQuality - restaurantQuality
+    );
+    if (qualityShortfall > 0) {
+      adjustment -= qualityShortfall * 1.25;
+      cap = Math.min(
+        cap,
+        added > 35 ? 72 :
+        added > 20 ? 78 :
+        84
+      );
+    } else if (added > maxAdded) {
+      adjustment += adventure ? 4 : 1;
+    }
+
+    if (isDiscovered && offset > 5) {
+      const requiredEvidence =
+        offset > 15 || added > 30 ? 8 : 4;
+      const evidenceShortfall = Math.max(
+        0,
+        requiredEvidence - evidence
+      );
+
+      if (evidenceShortfall > 0) {
+        adjustment -= evidenceShortfall * 3;
+        cap = Math.min(cap, offset > 15 ? 76 : 82);
+      } else if (adventure) {
+        adjustment += Math.min(5, evidence - requiredEvidence + 1);
+      }
+    }
+
+    return {
+      label,
+      requiredQuality,
+      qualityShortfall: Math.round(qualityShortfall),
+      evidence,
+      adjustment: Math.round(adjustment * 10) / 10,
+      cap
+    };
   }
 
   function scoreAddedTime(added, maxAdded) {
@@ -822,6 +945,16 @@ It is restaurant quality filtered through trip fit.
       c.discoverySource === "openstreetmap"
     ) {
       bullets.push("Route-discovered option with incomplete editorial quality data.");
+      if (c.routeOffsetMiles > 5) {
+        bullets.push(
+          `Adaptive search found it about ${c.routeOffsetMiles.toFixed(1)} miles from the route.`
+        );
+      }
+      if (c.destinationEvidenceLevel === "strong") {
+        bullets.push(
+          "It cleared the wider-search evidence threshold before detour time was considered."
+        );
+      }
       if (c.openAtArrival === null) {
         bullets.push("Published hours were not verified against the estimated arrival time.");
       }
@@ -838,6 +971,11 @@ It is restaurant quality filtered through trip fit.
     else if (s.restaurantQuality >= 82) bullets.push("Strong food reputation with a clear reason to stop.");
     else bullets.push("Solid available food choice for this stretch.");
 
+    if (s.detourGate?.label && s.detourGate.label !== "Practical detour") {
+      bullets.push(
+        `${s.detourGate.label}: the quality requirement rises as added time and route distance increase.`
+      );
+    }
     if (s.scarcityFit >= 88) bullets.push("No clearly better option is coming up soon.");
     if (s.style.includes("hungry")) bullets.push("Hungry Soon mode favors an earlier acceptable stop.");
     else if (s.style.includes("adventure") || s.style.includes("food")) bullets.push("Food Adventure mode is willing to wait for a stronger destination stop.");

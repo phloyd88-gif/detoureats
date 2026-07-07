@@ -1,4 +1,4 @@
-# DetourEats App v1.5 Beta
+# DetourEats App v1.6 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -479,3 +479,49 @@ Positive and negative ratings update a local preference profile for cuisine,
 chains versus independent places, quick versus sit-down stops, local favorites,
 and regional specialties. Learned preferences influence preference fit without
 overriding food-quality and route-fit guardrails.
+
+
+## v1.6 Beta: Worth the Detour
+
+The five-mile route corridor is no longer a hard discovery boundary.
+
+### Adaptive search tiers
+
+DetourEats now searches in stages:
+
+- **Practical corridor:** approximately five miles from the route
+- **Extended discovery:** promising restaurants up to approximately 15 miles from the route
+- **Destination discovery:** rare, stronger-evidence candidates up to approximately 25 miles from the route
+
+The Eating Priority controls the strategy automatically:
+
+- **Eat soon** searches the practical corridor first and widens only when the route is sparse
+- **Best overall** includes evidence-supported extended detours
+- **Worth waiting for** also checks the destination tier
+- Sparse routes can trigger a wider search without requiring the user to change settings
+
+### Quality requirements rise with detour cost
+
+A wider restaurant is not recommended merely because it was discovered.
+
+As route distance and actual added drive time increase, the scoring engine raises
+the food-quality and evidence threshold. Weak farther-away options receive a
+score penalty and a hard score ceiling.
+
+Route-discovered destination candidates require stronger OpenStreetMap evidence,
+such as Wikipedia/Wikidata references, award or star tags, a website plus a
+description, or a combination of other useful metadata. This is still not a
+substitute for independent food reviews, so the app labels the evidence level
+and retains conservative score caps.
+
+### Candidate routing allowances
+
+The route service can now evaluate farther candidates before scoring:
+
+- Eat soon: generally up to about 25 added minutes
+- Best overall: generally up to about 50 added minutes
+- Worth waiting for: generally up to about 75 added minutes
+
+These are evaluation ceilings, not automatic recommendations. The user's
+selected Max Added Time remains a major scoring input, and farther candidates
+must demonstrate a stronger reason to justify the trip cost.

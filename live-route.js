@@ -1,4 +1,4 @@
-/* DetourEats v1.5 Beta live route and discovery module
+/* DetourEats v1.6 Beta adaptive detour discovery module
    No account or API token is required.
 
    Prototype services:
@@ -21,14 +21,19 @@
     "https://overpass.kumi.systems/api/interpreter"
   ];
   const GEOCODE_DELAY_MS = 1100;
-  // Search a continuous corridor approximately five miles on either
-  // side of the route. Actual via-route detour calculations still decide
-  // whether a restaurant is practical.
-  const DISCOVERY_RADIUS_METERS = 8000;
+
+  // Adaptive discovery tiers. These are candidate-search distances from
+  // the route, not automatic recommendations.
+  const PRACTICAL_RADIUS_METERS = 8000;      // about 5 miles
+  const EXTENDED_RADIUS_METERS = 24000;      // about 15 miles
+  const DESTINATION_RADIUS_METERS = 40000;   // about 25 miles
+  const HUNGRY_FALLBACK_RADIUS_METERS = 12000;
+
   const MAX_ROUTE_SAMPLES = 28;
+  const WIDE_ROUTE_SAMPLES = 16;
   const ROUTE_SAMPLE_SPACING_METERS = 35000;
-  const MAX_DISCOVERED_CANDIDATES = 24;
-  const MAX_ROUTED_CANDIDATES = 28;
+  const MAX_DISCOVERED_CANDIDATES = 28;
+  const MAX_ROUTED_CANDIDATES = 30;
 
   const KNOWN_CHAINS = [
     "mcdonald", "burger king", "wendy", "taco bell", "kfc",
@@ -212,6 +217,7 @@
     destinationLabel,
     candidates,
     maxAddedMinutes,
+    tripMode,
     progressCallback
   }) {
     if (!Array.isArray(originCoordinates) && !String(originText || "").trim()) {
@@ -262,18 +268,26 @@
 
     const routeSamples = sampleRoute(routeCoordinates);
 
-    progressCallback?.("Finding restaurants along the route");
+    progressCallback?.("Finding restaurants worth leaving the route for");
     let discoveredCandidates = [];
     let discoveryStatus = "available";
+    let discoveryPlan = createDefaultDiscoveryPlan(tripMode);
 
     try {
-      discoveredCandidates = await discoverRestaurants(
+      const discovery = await discoverRestaurants(
         routeSamples,
-        progressCallback
+        progressCallback,
+        {
+          tripMode,
+          routeDistanceMeters: Number(baseline.distance || 0)
+        }
       );
+      discoveredCandidates = discovery.candidates;
+      discoveryPlan = discovery.plan;
     } catch (error) {
       console.warn("Restaurant discovery unavailable:", error);
       discoveryStatus = "unavailable";
+      discoveryPlan.status = "unavailable";
     }
 
     const relevantCurated = await prepareCuratedCandidates(
@@ -298,6 +312,8 @@
       initialDurationSeconds: Number(baseline.duration || 0),
       initialDistanceMeters: Number(baseline.distance || 0),
       discoveryStatus,
+      discoveryPlan,
+      tripMode: String(tripMode || "balanced"),
       discoveredCount: discoveredCandidates.length,
       curatedCount: relevantCurated.length,
       createdAt: Date.now()
@@ -328,7 +344,13 @@
       { steps: true, geometry: false }
     );
 
-    const maximumDetour = Math.max(Number(maxAddedMinutes || 10) + 25, 35);
+    const maximumDetour = getMaximumCandidateDetour(
+      maxAddedMinutes,
+      session.tripMode
+    );
+    const backtrackAllowanceSeconds = getBacktrackAllowanceSeconds(
+      session.tripMode
+    );
     const liveCandidates = [];
 
     for (let index = 0; index < session.candidates.length; index += 1) {
@@ -365,7 +387,7 @@
         if (addedMinutes > maximumDetour) continue;
         if (
           Number(firstLeg.duration || 0) >
-          Number(baseline.duration || 0) + 2400
+          Number(baseline.duration || 0) + backtrackAllowanceSeconds
         ) {
           continue;
         }
@@ -454,17 +476,170 @@
         discoveredCount: routedDiscovered,
         curatedCount: routedCurated,
         discoveryStatus: session.discoveryStatus,
-        searchRadiusMiles: metersToMiles(DISCOVERY_RADIUS_METERS),
-        searchMode: "continuous route corridor",
+        practicalCount: liveCandidates.filter(
+          candidate => candidate.detourTier === "practical"
+        ).length,
+        extendedCount: liveCandidates.filter(
+          candidate => candidate.detourTier === "extended"
+        ).length,
+        destinationDetourCount: liveCandidates.filter(
+          candidate => candidate.detourTier === "destination"
+        ).length,
+        searchRadiusMiles: Number(
+          session.discoveryPlan?.maximumRadiusMiles ||
+          metersToMiles(PRACTICAL_RADIUS_METERS)
+        ),
+        searchMode: session.discoveryPlan?.label || "Adaptive detour search",
+        searchSummary:
+          session.discoveryPlan?.summary ||
+          "Practical route corridor with wider evidence-based discovery",
+        extendedSearchUsed: Boolean(session.discoveryPlan?.extendedUsed),
+        destinationSearchUsed: Boolean(session.discoveryPlan?.destinationUsed),
         updatedAt: Date.now()
       }
     };
   }
 
-  async function discoverRestaurants(routeSamples, progressCallback) {
-    const cacheKey = routeSamples
+  async function discoverRestaurants(
+    routeSamples,
+    progressCallback,
+    options = {}
+  ) {
+    const style = normalizeTripMode(options.tripMode);
+    const routeMiles = metersToMiles(options.routeDistanceMeters || 0);
+
+    const practical = await fetchDiscoveryTier({
+      routeSamples,
+      radiusMeters: PRACTICAL_RADIUS_METERS,
+      evidenceMode: "all",
+      searchTier: "practical",
+      progressMessage: "Searching the practical route corridor",
+      progressCallback
+    });
+
+    let extended = [];
+    let destination = [];
+
+    const hungry = style === "hungry";
+    const adventure = style === "adventure";
+    const practicalSparse = practical.length < 8;
+
+    const extendedUsed =
+      adventure ||
+      style === "balanced" ||
+      practicalSparse;
+
+    if (extendedUsed) {
+      const extendedRadius = hungry
+        ? HUNGRY_FALLBACK_RADIUS_METERS
+        : EXTENDED_RADIUS_METERS;
+
+      extended = await fetchDiscoveryTier({
+        routeSamples: reduceRouteSamples(routeSamples, WIDE_ROUTE_SAMPLES),
+        radiusMeters: extendedRadius,
+        evidenceMode: "evidence",
+        searchTier: "extended",
+        progressMessage: hungry
+          ? "Checking slightly beyond a sparse food stretch"
+          : "Looking farther for places with a stronger food case",
+        progressCallback
+      });
+    }
+
+    const combinedBeforeDestination = dedupeCandidates([
+      ...practical,
+      ...extended
+    ]);
+
+    const destinationUsed =
+      !hungry &&
+      (
+        adventure ||
+        combinedBeforeDestination.length < 10 ||
+        (style === "balanced" && routeMiles >= 180 && practical.length < 14)
+      );
+
+    if (destinationUsed) {
+      destination = await fetchDiscoveryTier({
+        routeSamples: reduceRouteSamples(routeSamples, 12),
+        radiusMeters: DESTINATION_RADIUS_METERS,
+        evidenceMode: "destination",
+        searchTier: "destination",
+        progressMessage:
+          "Checking for rare destination-worthy detours beyond the normal corridor",
+        progressCallback
+      });
+    }
+
+    const candidates = selectDistributedDiscovered(
+      dedupeCandidates([
+        ...practical,
+        ...extended,
+        ...destination
+      ]),
+      routeSamples
+    );
+
+    const maximumRadiusMeters = destinationUsed
+      ? DESTINATION_RADIUS_METERS
+      : extendedUsed
+        ? hungry
+          ? HUNGRY_FALLBACK_RADIUS_METERS
+          : EXTENDED_RADIUS_METERS
+        : PRACTICAL_RADIUS_METERS;
+
+    return {
+      candidates,
+      plan: {
+        status: "available",
+        style,
+        practicalUsed: true,
+        extendedUsed,
+        destinationUsed,
+        practicalRadiusMiles: metersToMiles(PRACTICAL_RADIUS_METERS),
+        extendedRadiusMiles: extendedUsed
+          ? metersToMiles(
+              hungry
+                ? HUNGRY_FALLBACK_RADIUS_METERS
+                : EXTENDED_RADIUS_METERS
+            )
+          : 0,
+        destinationRadiusMiles: destinationUsed
+          ? metersToMiles(DESTINATION_RADIUS_METERS)
+          : 0,
+        maximumRadiusMiles: metersToMiles(maximumRadiusMeters),
+        label:
+          destinationUsed
+            ? "Adaptive search · destination detours included"
+            : extendedUsed
+              ? "Adaptive search · extended detours included"
+              : "Adaptive search · practical corridor",
+        summary: buildDiscoveryPlanSummary({
+          style,
+          extendedUsed,
+          destinationUsed,
+          practicalSparse
+        }),
+        practicalFound: practical.length,
+        extendedFound: extended.length,
+        destinationFound: destination.length
+      }
+    };
+  }
+
+  async function fetchDiscoveryTier({
+    routeSamples,
+    radiusMeters,
+    evidenceMode,
+    searchTier,
+    progressMessage,
+    progressCallback
+  }) {
+    const routeKey = routeSamples
       .map(point => `${point[1].toFixed(2)},${point[0].toFixed(2)}`)
       .join("|");
+    const cacheKey =
+      `adaptive-v1|${searchTier}|${radiusMeters}|${evidenceMode}|${routeKey}`;
     const cache = loadJsonStorage(DISCOVERY_CACHE_KEY);
     const cached = cache[cacheKey];
 
@@ -476,65 +651,221 @@
       return cached.items;
     }
 
-    const query = buildOverpassQuery(routeSamples);
+    const query = buildOverpassQuery(
+      routeSamples,
+      radiusMeters,
+      evidenceMode
+    );
     let data = null;
     let lastError = null;
 
     for (const endpoint of OVERPASS_URLS) {
       try {
-        progressCallback?.("Searching route food zones");
+        progressCallback?.(progressMessage);
         const body = new URLSearchParams({ data: query }).toString();
         data = await fetchJson(
           endpoint,
           {
             method: "POST",
             headers: {
-              "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
+              "Content-Type":
+                "application/x-www-form-urlencoded;charset=UTF-8"
             },
             body
           },
-          45000
+          evidenceMode === "all" ? 45000 : 55000
         );
         break;
       } catch (error) {
         lastError = error;
-        console.warn("Overpass endpoint failed:", endpoint, error);
+        console.warn(
+          `Overpass ${searchTier} discovery failed:`,
+          endpoint,
+          error
+        );
       }
     }
 
     if (!data) {
-      throw lastError || new Error("Restaurant discovery failed.");
+      if (searchTier === "practical") {
+        throw lastError || new Error("Restaurant discovery failed.");
+      }
+      return [];
     }
 
     const converted = (data.elements || [])
-      .map(element => convertOsmElement(element, routeSamples))
-      .filter(Boolean);
+      .map(element =>
+        convertOsmElement(element, routeSamples, searchTier)
+      )
+      .filter(Boolean)
+      .filter(candidate => {
+        if (searchTier === "destination") {
+          return candidate.destinationEvidenceLevel === "strong";
+        }
+        if (searchTier === "extended") {
+          return candidate.destinationEvidenceLevel !== "basic";
+        }
+        return true;
+      });
 
-    const selected = selectDistributedDiscovered(converted, routeSamples);
     cache[cacheKey] = {
       savedAt: Date.now(),
-      items: selected
+      items: converted
     };
-    saveJsonStorage(DISCOVERY_CACHE_KEY, cache);
+    saveJsonStorage(DISCOVERY_CACHE_KEY, trimDiscoveryCache(cache));
 
-    return selected;
+    return converted;
   }
 
-  function buildOverpassQuery(samples) {
+  function buildOverpassQuery(samples, radiusMeters, evidenceMode) {
     const path = samples
       .map(point =>
         `${Number(point[1]).toFixed(6)},${Number(point[0]).toFixed(6)}`
       )
       .join(",");
 
-    return `[out:json][timeout:45];
-nwr(around:${DISCOVERY_RADIUS_METERS},${path})
-  ["amenity"~"^(restaurant|fast_food|cafe)$"]
-  ["name"];
+    const selector =
+      `nwr(around:${radiusMeters},${path})` +
+      `["amenity"~"^(restaurant|fast_food|cafe)$"]["name"]`;
+
+    if (evidenceMode === "all") {
+      return `[out:json][timeout:45];
+${selector};
+out center tags meta;`;
+    }
+
+    const evidenceTags = evidenceMode === "destination"
+      ? [
+          "wikidata",
+          "wikipedia",
+          "award",
+          "stars"
+        ]
+      : [
+          "wikidata",
+          "wikipedia",
+          "website",
+          "contact:website",
+          "description",
+          "award",
+          "stars"
+        ];
+
+    const clauses = evidenceTags.map(tag => `${selector}["${tag}"];`);
+
+    if (evidenceMode === "destination") {
+      clauses.push(`${selector}["website"]["description"];`);
+      clauses.push(`${selector}["contact:website"]["description"];`);
+    }
+
+    return `[out:json][timeout:50];
+(
+${clauses.join("\n")}
+);
 out center tags meta;`;
   }
 
-  function convertOsmElement(element, routeSamples) {
+  function createDefaultDiscoveryPlan(tripMode) {
+    const style = normalizeTripMode(tripMode);
+    return {
+      status: "pending",
+      style,
+      practicalUsed: true,
+      extendedUsed: false,
+      destinationUsed: false,
+      practicalRadiusMiles: metersToMiles(PRACTICAL_RADIUS_METERS),
+      extendedRadiusMiles: 0,
+      destinationRadiusMiles: 0,
+      maximumRadiusMiles: metersToMiles(PRACTICAL_RADIUS_METERS),
+      label: "Adaptive search · practical corridor",
+      summary: "Searching the practical corridor first."
+    };
+  }
+
+  function buildDiscoveryPlanSummary({
+    style,
+    extendedUsed,
+    destinationUsed,
+    practicalSparse
+  }) {
+    if (destinationUsed) {
+      return style === "adventure"
+        ? "Worth waiting for searched the practical corridor, promising places up to about 15 miles away, and rare destination candidates up to about 25 miles away."
+        : "The route was sparse, so DetourEats widened the search to include rare destination candidates up to about 25 miles away.";
+    }
+
+    if (extendedUsed) {
+      return practicalSparse
+        ? "The normal route corridor was sparse, so DetourEats widened the search automatically."
+        : "Best overall included promising restaurants up to about 15 miles from the route.";
+    }
+
+    return "Eat soon found enough practical options close to the route.";
+  }
+
+  function normalizeTripMode(value) {
+    const mode = String(value || "balanced").toLowerCase();
+    if (
+      mode.includes("adventure") ||
+      mode.includes("food") ||
+      mode.includes("strict")
+    ) return "adventure";
+    if (mode.includes("hungry")) return "hungry";
+    return "balanced";
+  }
+
+  function reduceRouteSamples(samples, maximum) {
+    if (!Array.isArray(samples) || samples.length <= maximum) {
+      return samples || [];
+    }
+
+    const reduced = [];
+    for (let index = 0; index < maximum; index += 1) {
+      const sourceIndex = Math.round(
+        index * (samples.length - 1) / Math.max(1, maximum - 1)
+      );
+      reduced.push(samples[sourceIndex]);
+    }
+    return dedupeCoordinatePairs(reduced);
+  }
+
+  function trimDiscoveryCache(cache) {
+    return Object.fromEntries(
+      Object.entries(cache)
+        .sort(
+          (a, b) =>
+            Number(b[1]?.savedAt || 0) -
+            Number(a[1]?.savedAt || 0)
+        )
+        .slice(0, 24)
+    );
+  }
+
+  function getMaximumCandidateDetour(maxAddedMinutes, tripMode) {
+    const maxAdded = Number(maxAddedMinutes || 10);
+    const style = normalizeTripMode(tripMode);
+
+    if (style === "hungry") {
+      return Math.max(maxAdded + 15, 25);
+    }
+    if (style === "adventure") {
+      return Math.max(maxAdded + 55, 75);
+    }
+    return Math.max(maxAdded + 35, 50);
+  }
+
+  function getBacktrackAllowanceSeconds(tripMode) {
+    const style = normalizeTripMode(tripMode);
+    if (style === "hungry") return 1800;
+    if (style === "adventure") return 5400;
+    return 3600;
+  }
+
+  function convertOsmElement(
+    element,
+    routeSamples,
+    searchTier = "practical"
+  ) {
     const tags = element?.tags || {};
     const name = String(tags.name || "").trim();
     if (!name) return null;
@@ -558,6 +889,14 @@ out center tags meta;`;
       "";
     const phone = tags.phone || tags["contact:phone"] || "";
     const publishedHours = tags.opening_hours || "";
+    const description = String(tags.description || "").trim();
+    const wikipedia = tags.wikipedia || "";
+    const wikidata =
+      tags.wikidata ||
+      tags["brand:wikidata"] ||
+      "";
+    const award = tags.award || tags.awards || "";
+    const stars = tags.stars || "";
     const address = buildAddress(tags);
     const city =
       tags["addr:city"] ||
@@ -566,38 +905,117 @@ out center tags meta;`;
       tags["addr:hamlet"] ||
       "Along route";
 
+    const routeOffsetMeters = distanceToSamples(
+      coordinates,
+      routeSamples
+    );
+    const routeOffsetMiles = metersToMiles(routeOffsetMeters);
+    const detourTier =
+      routeOffsetMeters <= PRACTICAL_RADIUS_METERS
+        ? "practical"
+        : routeOffsetMeters <= EXTENDED_RADIUS_METERS
+          ? "extended"
+          : "destination";
+
+    const destinationEvidenceScore =
+      (wikipedia ? 5 : 0) +
+      (wikidata ? 4 : 0) +
+      (award ? 4 : 0) +
+      (stars ? 3 : 0) +
+      (website ? 2 : 0) +
+      (description ? 2 : 0) +
+      (cuisine ? 1 : 0) +
+      (publishedHours ? 1 : 0) +
+      (address ? 1 : 0) +
+      (phone ? 1 : 0) +
+      (!chain ? 1 : 0);
+
+    const destinationEvidenceLevel =
+      destinationEvidenceScore >= 8
+        ? "strong"
+        : destinationEvidenceScore >= 4
+          ? "moderate"
+          : "basic";
+
     const metadataCount = [
       cuisine,
       website,
       phone,
       publishedHours,
       address,
-      tags.wikidata || tags["brand:wikidata"]
+      wikidata,
+      wikipedia,
+      description,
+      award,
+      stars
     ].filter(Boolean).length;
 
-    const confidence = metadataCount >= 4 ? "Medium" : "Low";
-    const discoveryConfidence = metadataCount >= 4 ? "medium" : "low";
+    const confidence =
+      destinationEvidenceLevel === "strong"
+        ? "Medium"
+        : metadataCount >= 4
+          ? "Medium"
+          : "Low";
+    const discoveryConfidence =
+      destinationEvidenceLevel === "strong" ||
+      metadataCount >= 4
+        ? "medium"
+        : "low";
+
     const qualityBase =
-      amenity === "restaurant" ? 71 :
-      amenity === "cafe" ? 68 :
-      65;
+      amenity === "restaurant" ? 69 :
+      amenity === "cafe" ? 66 :
+      63;
+
     const foodReputation = clamp(
       qualityBase +
-      (cuisine ? 2 : 0) +
-      (website ? 2 : 0) +
-      (publishedHours ? 2 : 0) -
-      (chain ? 4 : 0),
-      58,
-      77
+      Math.min(8, destinationEvidenceScore) +
+      (cuisine ? 2 : 0) -
+      (chain ? 5 : 0),
+      56,
+      destinationEvidenceLevel === "strong" ? 82 : 78
     );
+
     const uniqueness = clamp(
-      (cuisine ? 66 : 55) +
-      (tags.wikidata ? 3 : 0) -
-      (chain ? 18 : 0),
-      35,
-      72
+      52 +
+      (cuisine ? 8 : 0) +
+      (description ? 5 : 0) +
+      (wikipedia ? 8 : 0) +
+      (award ? 7 : 0) -
+      (chain ? 20 : 0),
+      30,
+      88
     );
+
+    const destinationWorthiness = clamp(
+      foodReputation * 0.58 +
+      uniqueness * 0.24 +
+      Math.min(18, destinationEvidenceScore * 2),
+      48,
+      destinationEvidenceLevel === "strong" ? 91 : 82
+    );
+
     const routeBucket = nearestSampleIndex(coordinates, routeSamples);
+    const regionalSpecialty =
+      !chain &&
+      Boolean(cuisine) &&
+      destinationEvidenceLevel === "strong";
+    const localFavorite =
+      !chain &&
+      Boolean(wikipedia || wikidata || description);
+
+    const evidenceLabel =
+      destinationEvidenceLevel === "strong"
+        ? "strong destination evidence"
+        : destinationEvidenceLevel === "moderate"
+          ? "promising map evidence"
+          : "basic location data";
+
+    const famousFor = description
+      ? truncateText(description, 120)
+      : cuisine
+        ? `Cuisine listed as ${cuisine}`
+        : `${amenityLabel(amenity)} with ${evidenceLabel}`;
 
     return {
       id: `osm-${element.type}-${element.id}`,
@@ -619,49 +1037,110 @@ out center tags meta;`;
         amenity === "cafe" ||
         String(tags.takeaway || "").toLowerCase() === "yes",
       sitDown: amenity !== "fast_food",
-      localFavorite: false,
-      regionalSpecialty: false,
+      localFavorite,
+      regionalSpecialty,
       kidFriendly: false,
       easyParking:
         String(tags.parking || "").toLowerCase() === "yes" ||
         Boolean(tags["parking:lane"]),
       foodReputation,
-      destinationWorthiness: clamp(foodReputation - 4, 54, 73),
+      destinationWorthiness,
       uniqueness,
-      reviewConfidence: clamp(46 + metadataCount * 3, 46, 64),
-      consistency: 64,
-      famousFor: cuisine
-        ? `Cuisine listed as ${cuisine}`
-        : `Route-discovered ${amenityLabel(amenity).toLowerCase()}`,
+      reviewConfidence: clamp(
+        44 + metadataCount * 3 +
+        (destinationEvidenceLevel === "strong" ? 5 : 0),
+        44,
+        72
+      ),
+      consistency: 62,
+      famousFor,
       evidenceSummary:
-        "Discovered along the current route from OpenStreetMap. DetourEats has not independently reviewed its food quality.",
+        `Found ${routeOffsetMiles.toFixed(1)} miles from the route with ${evidenceLabel}. DetourEats has not independently reviewed its food quality.`,
       openAtArrival: null,
-      hoursConfidence: publishedHours ? "listed_not_evaluated" : "unknown",
-      publishedHours: publishedHours || "Not listed in OpenStreetMap",
+      hoursConfidence: publishedHours
+        ? "listed_not_evaluated"
+        : "unknown",
+      publishedHours:
+        publishedHours ||
+        "Not listed in OpenStreetMap",
       website,
       phone,
       confidence,
       discoveryConfidence,
       provenance: "route-discovered",
       discoverySource: "openstreetmap",
-      sourceType: "Route-discovered from OpenStreetMap",
-      sourceUrl: `https://www.openstreetmap.org/${element.type}/${element.id}`,
+      sourceType:
+        detourTier === "destination"
+          ? "Destination-detour discovery from OpenStreetMap"
+          : detourTier === "extended"
+            ? "Extended-detour discovery from OpenStreetMap"
+            : "Route discovery from OpenStreetMap",
+      sourceUrl:
+        `https://www.openstreetmap.org/${element.type}/${element.id}`,
       verifiedDate: element.timestamp
         ? `OSM feature updated ${formatDate(element.timestamp)}`
         : "Discovered on current route",
       mappedTimestamp: element.timestamp || "",
       operationalRisk:
-        "Route-discovered option. Hours and food quality are not independently verified.",
+        detourTier === "practical"
+          ? "Route-discovered option. Hours and food quality are not independently verified."
+          : `Wider-search candidate ${routeOffsetMiles.toFixed(1)} miles from the route. Actual detour time is calculated, but food quality and hours still require verification.`,
       routeBucket,
-      discoveryRank: metadataCount * 10 + foodReputation - (chain ? 15 : 0)
+      routeOffsetMiles,
+      detourTier,
+      searchTier,
+      destinationEvidenceScore,
+      destinationEvidenceLevel,
+      discoveryRank:
+        destinationEvidenceScore * 14 +
+        foodReputation +
+        destinationWorthiness -
+        routeOffsetMiles * 1.4 -
+        (chain ? 18 : 0)
     };
   }
 
-  function selectDistributedDiscovered(candidates, routeSamples) {
+  function truncateText(value, limit) {
+    const text = String(value || "").trim();
+    if (text.length <= limit) return text;
+    return `${text.slice(0, Math.max(0, limit - 1)).trim()}…`;
+  }
+
+  function selectDistributedDiscovered(
+    candidates,
+    routeSamples
+  ) {
     const deduped = dedupeCandidates(candidates);
+    const practical = deduped.filter(
+      candidate => candidate.detourTier === "practical"
+    );
+    const extended = deduped.filter(
+      candidate => candidate.detourTier === "extended"
+    );
+    const destination = deduped.filter(
+      candidate => candidate.detourTier === "destination"
+    );
+
+    const selected = [
+      ...selectTierDistributed(practical, 2, 16),
+      ...selectTierDistributed(extended, 1, 8),
+      ...selectTierDistributed(destination, 1, 4)
+    ];
+
+    return dedupeCandidates(selected)
+      .sort((a, b) => {
+        if (a.routeBucket !== b.routeBucket) {
+          return a.routeBucket - b.routeBucket;
+        }
+        return Number(b.discoveryRank) - Number(a.discoveryRank);
+      })
+      .slice(0, MAX_DISCOVERED_CANDIDATES);
+  }
+
+  function selectTierDistributed(candidates, perBucket, maximum) {
     const buckets = new Map();
 
-    for (const candidate of deduped) {
+    for (const candidate of candidates) {
       const bucket = Number(candidate.routeBucket || 0);
       if (!buckets.has(bucket)) buckets.set(bucket, []);
       buckets.get(bucket).push(candidate);
@@ -670,19 +1149,33 @@ out center tags meta;`;
     const selected = [];
     for (const bucket of [...buckets.keys()].sort((a, b) => a - b)) {
       const options = buckets.get(bucket).sort(
-        (a, b) => Number(b.discoveryRank) - Number(a.discoveryRank)
+        (a, b) =>
+          Number(b.discoveryRank || 0) -
+          Number(a.discoveryRank || 0)
       );
-      selected.push(...options.slice(0, 2));
+      selected.push(...options.slice(0, perBucket));
     }
 
-    return selected
-      .sort((a, b) => {
-        if (a.routeBucket !== b.routeBucket) {
-          return a.routeBucket - b.routeBucket;
-        }
-        return b.discoveryRank - a.discoveryRank;
-      })
-      .slice(0, MAX_DISCOVERED_CANDIDATES);
+    if (selected.length >= maximum) {
+      return selected
+        .sort(
+          (a, b) =>
+            Number(b.discoveryRank || 0) -
+            Number(a.discoveryRank || 0)
+        )
+        .slice(0, maximum);
+    }
+
+    const selectedIds = new Set(selected.map(candidate => candidate.id));
+    const remaining = candidates
+      .filter(candidate => !selectedIds.has(candidate.id))
+      .sort(
+        (a, b) =>
+          Number(b.discoveryRank || 0) -
+          Number(a.discoveryRank || 0)
+      );
+
+    return [...selected, ...remaining].slice(0, maximum);
   }
 
   function mergeCandidates(curated, discovered) {
@@ -709,14 +1202,65 @@ out center tags meta;`;
     return [...seen.values()];
   }
 
-  function selectCandidatesForRouting(candidates, routeSamples) {
-    return candidates
-      .map(candidate => ({
-        ...candidate,
-        routeBucket:
-          candidate.routeBucket ??
-          nearestSampleIndex(candidate.coordinates, routeSamples)
-      }))
+  function selectCandidatesForRouting(
+    candidates,
+    routeSamples
+  ) {
+    const normalized = candidates.map(candidate => ({
+      ...candidate,
+      routeBucket:
+        candidate.routeBucket ??
+        nearestSampleIndex(candidate.coordinates, routeSamples),
+      detourTier:
+        candidate.detourTier ||
+        (
+          candidate.provenance === "curated"
+            ? "practical"
+            : "practical"
+        )
+    }));
+
+    const curated = normalized
+      .filter(candidate => candidate.provenance === "curated")
+      .sort((a, b) => a.routeBucket - b.routeBucket)
+      .slice(0, 8);
+
+    const practical = selectTierDistributed(
+      normalized.filter(
+        candidate =>
+          candidate.provenance !== "curated" &&
+          candidate.detourTier === "practical"
+      ),
+      2,
+      12
+    );
+
+    const extended = selectTierDistributed(
+      normalized.filter(
+        candidate =>
+          candidate.provenance !== "curated" &&
+          candidate.detourTier === "extended"
+      ),
+      1,
+      6
+    );
+
+    const destination = selectTierDistributed(
+      normalized.filter(
+        candidate =>
+          candidate.provenance !== "curated" &&
+          candidate.detourTier === "destination"
+      ),
+      1,
+      4
+    );
+
+    return dedupeCandidates([
+      ...curated,
+      ...practical,
+      ...extended,
+      ...destination
+    ])
       .sort((a, b) => {
         if (a.routeBucket !== b.routeBucket) {
           return a.routeBucket - b.routeBucket;
@@ -724,7 +1268,8 @@ out center tags meta;`;
         if (a.provenance !== b.provenance) {
           return a.provenance === "curated" ? -1 : 1;
         }
-        return Number(b.discoveryRank || 0) - Number(a.discoveryRank || 0);
+        return Number(b.discoveryRank || 0) -
+          Number(a.discoveryRank || 0);
       })
       .slice(0, MAX_ROUTED_CANDIDATES);
   }

@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.6 Beta
+- Replaced the fixed five-mile discovery boundary with adaptive practical, extended, and destination search tiers.
+- Added evidence-supported restaurant discovery up to about 15 miles from the route for Best Overall.
+- Added rare destination-candidate discovery up to about 25 miles from the route for Worth Waiting For and sparse routes.
+- Kept Eat Soon focused near the route, with limited automatic widening only when options are sparse.
+- Added stronger OpenStreetMap evidence requirements for wider candidates.
+- Added actual-detour evaluation ceilings that vary by Eating Priority.
+- Added escalating food-quality and evidence thresholds as added time and distance increase.
+- Added Practical, Extended Detour, and Destination Detour labels throughout the recommendation card, timeline, route preview, and trust details.
+- Added route-preview explanations of which adaptive search stages were used.
+- Updated route-preview caching so changing Eating Priority recalculates the appropriate search scope.
+
+
 ## v1.5 Beta
 - Replaced isolated 3.1-mile search circles with a continuous route corridor approximately five miles on each side.
 - Increased route sampling from a maximum of 14 to 28 points.

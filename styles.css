@@ -2209,3 +2209,105 @@ button:disabled {
     display: grid;
   }
 }
+
+
+/* v1.6 Beta: adaptive detour discovery */
+.adaptive-detour-note {
+  margin: 2px 0 14px;
+  padding: 13px 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 16px;
+  background: #fff7ed;
+}
+.adaptive-detour-note div > span,
+.adaptive-detour-note div > strong {
+  display: block;
+}
+.adaptive-detour-note div > span {
+  color: #9a3412;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.adaptive-detour-note div > strong {
+  margin-top: 4px;
+  color: #7c2d12;
+  font-size: 13px;
+}
+.adaptive-detour-note p {
+  margin: 6px 0 0;
+  color: #9a3412;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.adaptive-search-summary {
+  margin-top: 9px;
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+}
+.adaptive-search-summary strong,
+.adaptive-search-summary span {
+  display: block;
+}
+.adaptive-search-summary strong {
+  color: #9a3412;
+  font-size: 10px;
+}
+.adaptive-search-summary span {
+  margin-top: 3px;
+  color: #7c2d12;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.detour-tier-chip {
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.detour-tier-practical {
+  color: #14532d;
+  background: #dcfce7;
+}
+.detour-tier-extended {
+  color: #9a3412;
+  background: #ffedd5;
+}
+.detour-tier-destination {
+  color: #6b21a8;
+  background: #f3e8ff;
+}
+
+.timeline-detour-tier {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 5px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.trust-snapshot-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 560px) {
+  .card-status-chips {
+    gap: 5px;
+  }
+  .detour-tier-chip {
+    padding: 7px 8px;
+    font-size: 9px;
+  }
+  .trust-snapshot-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

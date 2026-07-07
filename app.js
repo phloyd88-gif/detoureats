@@ -1,4 +1,4 @@
-/* DetourEats v1.5 Beta app layer
+/* DetourEats v1.6 Beta app layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -506,7 +506,16 @@ function renderDriverStatus(pick, result, trip) {
 
     const discoverySummary =
       Number(metrics.discoveredCount || 0) > 0
-        ? `${metrics.discoveredCount} route-discovered · ${metrics.curatedCount || 0} curated`
+        ? [
+            `${metrics.discoveredCount} discovered`,
+            Number(metrics.extendedCount || 0) > 0
+              ? `${metrics.extendedCount} extended`
+              : "",
+            Number(metrics.destinationDetourCount || 0) > 0
+              ? `${metrics.destinationDetourCount} destination`
+              : "",
+            `${metrics.curatedCount || 0} curated`
+          ].filter(Boolean).join(" · ")
         : metrics.discoveryStatus === "unavailable"
           ? "Restaurant discovery unavailable; curated stops only"
           : `${metrics.curatedCount || 0} curated stops`;
@@ -743,6 +752,39 @@ function getScoreComparison(pick, result) {
   };
 }
 
+function getDetourTierStatus(pick) {
+  const tier = pick?.detourTier || "practical";
+  const offset = Number(pick?.routeOffsetMiles || 0);
+
+  if (tier === "destination") {
+    return {
+      label: "Destination detour",
+      className: "detour-tier-destination",
+      detail: offset
+        ? `Found about ${offset.toFixed(1)} miles from the route`
+        : "Found in the widest destination search"
+    };
+  }
+
+  if (tier === "extended") {
+    return {
+      label: "Extended detour",
+      className: "detour-tier-extended",
+      detail: offset
+        ? `Found about ${offset.toFixed(1)} miles from the route`
+        : "Found beyond the practical corridor"
+    };
+  }
+
+  return {
+    label: "Practical detour",
+    className: "detour-tier-practical",
+    detail: offset
+      ? `About ${offset.toFixed(1)} miles from the route`
+      : "Within the normal route corridor"
+  };
+}
+
 function getProvenanceStatus(pick) {
   if (pick?.provenance === "route-discovered") {
     return {
@@ -768,9 +810,19 @@ function getHoursStatus(pick) {
   return "Hours not verified";
 }
 
+function formatEvidenceLevel(level) {
+  const labels = {
+    strong: "Strong map evidence",
+    moderate: "Promising map evidence",
+    basic: "Basic map data"
+  };
+  return labels[String(level || "basic").toLowerCase()] || "Curated evidence";
+}
+
 function renderTrustSnapshot(pick) {
   const routeMode = pick.liveRoute ? "Live route" : "Curated route";
   const provenance = getProvenanceStatus(pick);
+  const detourTier = getDetourTierStatus(pick);
   const confidence = pick.confidence || "Medium";
   const hours = getHoursStatus(pick);
   const freshness = pick.verifiedDate || "Prototype dataset";
@@ -791,6 +843,9 @@ function renderTrustSnapshot(pick) {
       <div class="trust-snapshot-grid">
         <div><span>Restaurant data</span><strong>${escapeHtml(confidence)} confidence</strong></div>
         <div><span>Hours</span><strong>${escapeHtml(hours)}</strong></div>
+        <div><span>Search tier</span><strong>${escapeHtml(detourTier.label)}</strong></div>
+        <div><span>Route distance</span><strong>${escapeHtml(detourTier.detail)}</strong></div>
+        <div><span>Evidence</span><strong>${escapeHtml(formatEvidenceLevel(pick.destinationEvidenceLevel))}</strong></div>
         <div><span>Data status</span><strong>${escapeHtml(freshness)}</strong></div>
       </div>
       ${risk}
@@ -826,6 +881,7 @@ function renderDecisionCard(pick, trip, copy) {
   const openLabel = getHoursStatus(pick);
   const confidence = getConfidenceStatus(pick);
   const provenance = getProvenanceStatus(pick);
+  const detourTier = getDetourTierStatus(pick);
   const timing = getDecisionTiming(pick);
   const comparison = getScoreComparison(pick, state.currentResult);
   const explanation = pick.scoreExplanation || {};
@@ -839,6 +895,7 @@ function renderDecisionCard(pick, trip, copy) {
       <div class="badge ${trip.badgeClass}">${escapeHtml(tier)}</div>
       <div class="card-status-chips">
         <div class="provenance-chip ${provenance.className}">${escapeHtml(provenance.label)}</div>
+        <div class="detour-tier-chip ${detourTier.className}">${escapeHtml(detourTier.label)}</div>
         <div class="confidence-chip ${confidence.className}">${escapeHtml(confidence.label)}</div>
       </div>
     </div>
@@ -1024,6 +1081,14 @@ function renderTripTimeline(pick, result) {
           <div class="timeline-provenance ${candidate.provenance === "route-discovered" ? "provenance-discovered" : "provenance-curated"}">
             ${candidate.provenance === "route-discovered" ? "Route-discovered option" : "Curated recommendation"}
           </div>
+          ${candidate.provenance === "route-discovered" ? `
+            <div class="timeline-detour-tier ${getDetourTierStatus(candidate).className}">
+              ${escapeHtml(getDetourTierStatus(candidate).label)}
+              ${Number(candidate.routeOffsetMiles || 0) > 0
+                ? ` · ${Number(candidate.routeOffsetMiles).toFixed(1)} mi from route`
+                : ""}
+            </div>
+          ` : ""}
           <div class="timeline-meta">
             <span>${escapeHtml(timing)}</span>
             <span>Adds ${candidate.added} min</span>
@@ -1168,6 +1233,9 @@ function renderDetailsPanel(pick, trip, copy) {
       <div class="trust-row"><span>Last checked</span><strong>${escapeHtml(pick.verifiedDate || "Prototype dataset")}</strong></div>
       ${pick.liveRoute ? `<div class="trust-row"><span>Route mode</span><strong>Live location beta</strong></div>` : ""}
       ${pick.liveRoute ? `<div class="trust-row"><span>Distance ahead</span><strong>${escapeHtml(String(pick.distanceAheadMiles ?? "—"))} miles</strong></div>` : ""}
+      ${pick.provenance === "route-discovered" ? `<div class="trust-row"><span>Detour search tier</span><strong>${escapeHtml(getDetourTierStatus(pick).label)}</strong></div>` : ""}
+      ${pick.provenance === "route-discovered" ? `<div class="trust-row"><span>Approx. distance from route</span><strong>${escapeHtml(Number(pick.routeOffsetMiles || 0).toFixed(1))} miles</strong></div>` : ""}
+      ${pick.provenance === "route-discovered" ? `<div class="trust-row"><span>Destination evidence</span><strong>${escapeHtml(formatEvidenceLevel(pick.destinationEvidenceLevel))}</strong></div>` : ""}
       ${sourceLink}
     </div>
 
@@ -1287,7 +1355,12 @@ function getRouteSignature() {
     ? `selected:${state.destinationSelection.coordinates.map(value => Number(value).toFixed(5)).join(",")}`
     : `text:${String(els.destinationInput?.value || "").trim().toLowerCase()}`;
 
-  return `${originKey}|${destinationKey}|${Number(els.maxAddedInput?.value || 10)}`;
+  return [
+    originKey,
+    destinationKey,
+    Number(els.maxAddedInput?.value || 10),
+    String(els.tripModeInput?.value || "balanced")
+  ].join("|");
 }
 
 function invalidateRoutePreview() {
@@ -1431,7 +1504,11 @@ function renderRoutePreview(message = "") {
         <div><span>Distance</span><strong>${escapeHtml(String(Math.round(Number(metrics.totalMiles || metrics.remainingMiles || 0))))} mi</strong></div>
         <div><span>Food options</span><strong>${total}</strong></div>
       </div>
-      <p>${discovered} route-discovered · ${curated} curated · approximately ${Number(metrics.searchRadiusMiles || 5).toFixed(0)} mi route corridor</p>
+      <p>${discovered} route-discovered · ${curated} curated</p>
+      <div class="adaptive-search-summary">
+        <strong>${escapeHtml(metrics.searchMode || "Adaptive detour search")}</strong>
+        <span>${escapeHtml(metrics.searchSummary || `Searched up to approximately ${Number(metrics.searchRadiusMiles || 5).toFixed(0)} miles from the route.`)}</span>
+      </div>
     </div>
   `;
 }
@@ -1503,6 +1580,7 @@ async function previewSelectedRoute({ quiet = false } = {}) {
       destinationLabel: state.destinationSelection?.label || destinationText,
       candidates: window.DETOUR_EATS_CANDIDATES || [],
       maxAddedMinutes: Number(els.maxAddedInput.value),
+      tripMode: els.tripModeInput.value,
       progressCallback: message => {
         state.routingMessage = message;
         renderRoutePreview(message);
@@ -2732,7 +2810,10 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
   });
   el.addEventListener("change", () => {
     savePreferences();
-    if (el === els.maxAddedInput && !state.started) {
+    if (
+      (el === els.maxAddedInput || el === els.tripModeInput) &&
+      !state.started
+    ) {
       invalidateRoutePreview();
     }
     if (state.started) updateFromControls();
