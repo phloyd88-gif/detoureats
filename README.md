@@ -1,4 +1,4 @@
-# DetourEats App v0.5.1
+# DetourEats App v0.5.2
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -154,3 +154,10 @@ The trip style now materially changes scoring:
 - Hungry Soon favors earlier acceptable stops and penalizes waiting.
 - Balanced weighs food quality and trip cost together.
 - Food Adventure tolerates more waiting and detour time for destination-worthy food.
+
+
+## v0.5.2: Hungry Soon behavior correction
+
+- Added Park Diner & Restaurant in Binghamton as a real earlier open corridor stop.
+- Hungry Soon now selects the earliest open candidate that clears a minimum quality bar.
+- This is a decision rule, not merely a small scoring preference.

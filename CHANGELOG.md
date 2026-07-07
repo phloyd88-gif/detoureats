@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.2
+- Fixed Hungry Soon still selecting Bonnie Blue.
+- Added a real earlier open stop in Binghamton.
+- Hungry Soon now explicitly selects the earliest open candidate that clears the quality threshold.
+
+
 ## v0.5.1
 - Fixed trip style selector so it materially changes recommendations.
 - Added urgency scoring.

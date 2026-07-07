@@ -37,6 +37,33 @@ const candidates = [
     mapsUrl: "https://www.google.com/maps/search/?api=1&query=Brooks%27+House+of+BBQ+Oneonta+NY"
   },
   {
+    id: "park-diner-binghamton",
+    seq: 2,
+    name: "Park Diner & Restaurant",
+    city: "Binghamton, NY",
+    address: "119 Conklin Ave, Binghamton, NY 13903",
+    category: "Diner / Breakfast",
+    chain: false,
+    estimatedAddedMinutes: 7,
+    estimateLabel: "Estimated",
+    foodReputation: 79,
+    destinationWorthiness: 72,
+    uniqueness: 67,
+    reviewConfidence: 83,
+    consistency: 82,
+    famousFor: "classic diner breakfast, sandwiches, and a riverfront setting",
+    evidenceSummary: "A practical independent breakfast or early-lunch stop that is open when the trip reaches Binghamton.",
+    arrivalClock: "10:35 AM",
+    openAtArrival: true,
+    publishedHours: "Mon–Sat 7 AM–8:30 PM; Sun 7 AM–3 PM",
+    verifiedDate: "July 2026",
+    confidence: "High",
+    sourceType: "Official restaurant website",
+    sourceUrl: "https://www.theparkdinerandrestaurant.com/",
+    mapsUrl: "https://www.google.com/maps/search/?api=1&query=Park+Diner+and+Restaurant+Binghamton+NY"
+  },
+
+  {
     id: "krumpes-donuts",
     seq: 3,
     name: "Krumpe's Do-Nut Shop",

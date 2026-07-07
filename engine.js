@@ -22,7 +22,25 @@ It is restaurant quality filtered through trip fit.
       .map(candidate => scoreCandidate(candidate, settings, normalized))
       .sort((a, b) => b.detourScore - a.detourScore);
 
-    const pick = scored[0] || null;
+    let pick = scored[0] || null;
+
+    const style = String(settings.tripMode || "balanced").toLowerCase();
+    if (style.includes("hungry")) {
+      const earliestGoodEnough = scored
+        .filter(c =>
+          c.openAtArrival !== false &&
+          c.restaurantQuality >= 72 &&
+          c.detourScore >= 76
+        )
+        .sort((a, b) => {
+          if (a.seq !== b.seq) return a.seq - b.seq;
+          return b.detourScore - a.detourScore;
+        })[0];
+
+      if (earliestGoodEnough) {
+        pick = earliestGoodEnough;
+      }
+    }
 
     return {
       pick,
