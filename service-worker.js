@@ -1,4 +1,4 @@
-const CACHE_NAME = "detoureats-v1-4-beta";
+const CACHE_NAME = "detoureats-v1-5-beta";
 const ASSETS = [
   "./",
   "./index.html",

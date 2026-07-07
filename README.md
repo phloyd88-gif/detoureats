@@ -1,4 +1,4 @@
-# DetourEats App v1.4 Beta
+# DetourEats App v1.5 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -432,3 +432,50 @@ require an account or API token.
 Photon is appropriate for beta testing but does not provide an availability
 guarantee. A production release should use a dedicated hosted or self-hosted
 autocomplete service.
+
+
+## v1.5 Beta: Seamless Driver Loop
+
+### Continuous restaurant-search corridor
+
+v1.4 searched within 5,000 meters of isolated route samples. v1.5 replaces
+those separate circles with an Overpass polyline search covering a continuous
+8,000-meter corridor on either side of the sampled route.
+
+The app now:
+
+- Samples the route more densely, up to 28 route points
+- Searches continuously along the lines connecting those points
+- Looks approximately five miles to either side of the route
+- Still calculates the actual route through every shortlisted restaurant
+- Still rejects excessive added time and backtracking
+
+The eight-kilometer discovery corridor is only the initial candidate search.
+A restaurant is not recommended solely because it falls inside that corridor.
+
+### Voice and approach alerts
+
+- Voice guidance can be enabled with one tap
+- Strong recommendations can trigger around 20 minutes, 5 minutes, and the immediate decision point
+- System notifications use the same route events when permission is granted
+- Duplicate announcements for the same restaurant and stage are suppressed
+
+These alerts require the browser/PWA to remain active. Reliable locked-screen
+and background monitoring still requires the planned native-app conversion.
+
+### Add Stop and Navigate
+
+The primary action now opens Google Maps or Apple Maps with the recommended
+restaurant inserted before the original destination. The user's navigation
+choice can be remembered.
+
+### Preference learning
+
+After a navigation handoff, DetourEats can ask:
+
+**Was this stop worth the detour?**
+
+Positive and negative ratings update a local preference profile for cuisine,
+chains versus independent places, quick versus sit-down stops, local favorites,
+and regional specialties. Learned preferences influence preference fit without
+overriding food-quality and route-fit guardrails.

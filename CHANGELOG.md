@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.5 Beta
+- Replaced isolated 3.1-mile search circles with a continuous route corridor approximately five miles on each side.
+- Increased route sampling from a maximum of 14 to 28 points.
+- Added spoken recommendation alerts at approaching, soon, and decide-now stages.
+- Connected browser notifications to recommendation approach events.
+- Added Add Stop & Navigate with Google Maps and Apple Maps multistop handoff.
+- Added remembered navigation-app preference.
+- Added one-tap post-stop Worth It feedback and optional quick reasons.
+- Added local preference learning for cuisine, chain/independent, stop type, local, and regional signals.
+- Added learned preference fit to Detour Score while retaining quality guardrails.
+- Clearly labeled foreground-only alert limitations pending native conversion.
+
+
 ## v1.4 Beta
 - Added address and place autocomplete to Starting Point and Destination.
 - Added selectable full-address, street, city, landmark, and business suggestions.

@@ -192,7 +192,17 @@
           <button id="previewRouteButton" class="secondary" type="button">Preview Route</button>
           <button id="startTripButton" class="primary" type="button">Trust Us</button>
         </div>
-        <button id="enableNotificationsButton" class="secondary">Enable Test Notifications</button>
+        <section class="trip-alert-setup" aria-label="Trip alerts">
+          <div>
+            <span>Hands-free assistance</span>
+            <strong>Voice and approach alerts</strong>
+            <small>Alerts currently work while DetourEats remains active. Native background operation comes in the app conversion.</small>
+          </div>
+          <div class="trip-alert-buttons">
+            <button id="voiceToggleButton" class="secondary compact-action" type="button">Turn Voice On</button>
+            <button id="enableNotificationsButton" class="secondary compact-action" type="button">Enable Alerts</button>
+          </div>
+        </section>
 
         <p class="trust-note">Typed starting points and current location both use live beta routing. No fixed Amsterdam-to-Myrtle Beach route is required.</p>
       </div>
@@ -252,6 +262,10 @@
             <span>Decision timing</span>
             <strong id="decisionCountdownText">No decision yet</strong>
           </div>
+          <div>
+            <span>Trip alerts</span>
+            <strong id="tripAlertStatusText">Voice off · alerts off</strong>
+          </div>
         </div>
       </section>
 
@@ -274,7 +288,7 @@
 
 
       <div class="button-row driver-primary-actions">
-        <button id="takeMeThereButton" class="primary">Take Me There</button>
+        <button id="takeMeThereButton" class="primary">Add Stop &amp; Navigate</button>
         <button id="skipButton" class="secondary">Skip</button>
       </div>
 
@@ -282,6 +296,7 @@
         <button id="whyButton" class="driver-action" type="button" aria-expanded="false">Tell Me Why</button>
         <button id="fasterButton" class="driver-action" type="button">Eat Sooner</button>
         <button id="recheckRouteButton" class="driver-action hidden" type="button">Recheck Route</button>
+        <button id="rateLastStopButton" class="driver-action hidden" type="button">Rate Last Stop</button>
       </div>
 
 
@@ -301,6 +316,29 @@
           <button type="button" data-skip-reason="too-expensive">Too expensive</button>
           <button type="button" data-skip-reason="need-faster">Need something faster</button>
           <button type="button" data-skip-reason="show-better">Show me something better</button>
+        </div>
+      </section>
+
+
+      <section id="stopFeedbackPanel" class="stop-feedback-panel hidden" aria-live="polite">
+        <div class="feedback-header">
+          <div>
+            <span>Help DetourEats learn</span>
+            <strong id="feedbackQuestion">Was this stop worth the detour?</strong>
+          </div>
+          <button id="closeFeedbackButton" class="skip-close" type="button" aria-label="Close feedback">×</button>
+        </div>
+
+        <div id="feedbackPrimaryActions" class="feedback-primary-actions">
+          <button type="button" data-feedback-value="positive">👍 Worth it</button>
+          <button type="button" data-feedback-value="negative">👎 Not worth it</button>
+          <button type="button" data-feedback-value="did-not-stop">Didn’t stop</button>
+        </div>
+
+        <div id="feedbackReasonArea" class="feedback-reason-area hidden">
+          <span>Optional: what mattered?</span>
+          <div id="feedbackReasonButtons" class="feedback-reason-buttons"></div>
+          <button id="finishFeedbackButton" class="text-button" type="button">Done</button>
         </div>
       </section>
 
@@ -352,6 +390,38 @@
       </div>
     </section>
   </main>
+
+  <div id="navigationModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="navigationModalTitle">
+    <section class="navigation-modal-card">
+      <div class="navigation-modal-heading">
+        <div>
+          <span>Add restaurant as the next stop</span>
+          <strong id="navigationModalTitle">Choose your navigation app</strong>
+        </div>
+        <button id="closeNavigationModalButton" class="skip-close" type="button" aria-label="Close navigation options">×</button>
+      </div>
+
+      <p id="navigationModalSummary">The restaurant will be inserted before your original destination.</p>
+
+      <div class="navigation-choice-grid">
+        <button id="googleMapsButton" class="navigation-choice" type="button">
+          <strong>Google Maps</strong>
+          <span>Restaurant + final destination</span>
+        </button>
+        <button id="appleMapsButton" class="navigation-choice" type="button">
+          <strong>Apple Maps</strong>
+          <span>Multistop route on supported Apple devices</span>
+        </button>
+      </div>
+
+      <label class="remember-navigation-choice">
+        <input id="rememberNavigationChoiceInput" type="checkbox" checked>
+        <span>Remember my choice</span>
+      </label>
+
+      <button id="resetNavigationPreferenceButton" class="text-button hidden" type="button">Ask me every time</button>
+    </section>
+  </div>
 
   <script src="data.js"></script>
   <script src="engine.js"></script>

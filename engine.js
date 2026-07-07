@@ -373,8 +373,86 @@ It is restaurant quality filtered through trip fit.
       }
     }
 
+    const learned = scoreLearnedPreferences(candidate, settings.learnedPreferences);
+    if (learned.hasSignal) {
+      parts.push(learned.score);
+      reasons.push(...learned.reasons);
+    }
+
     const score = parts.reduce((sum, value) => sum + value, 0) / parts.length;
     return { score: clamp(score), reasons };
+  }
+
+  function scoreLearnedPreferences(candidate, profile) {
+    if (!profile || number(profile.totalRatings, 0) < 1) {
+      return { score: 75, reasons: [], hasSignal: false };
+    }
+
+    const parts = [];
+    const reasons = [];
+    const categoryKey = normalizePreferenceKey(
+      candidate.category || candidate.cuisine || ""
+    );
+    const categorySignal = number(profile.categorySignals?.[categoryKey], 0);
+
+    if (categoryKey && categorySignal !== 0) {
+      parts.push(clamp(75 + categorySignal * 6, 45, 98));
+      if (categorySignal >= 2) {
+        reasons.push("Matches cuisine patterns from your prior ratings.");
+      } else if (categorySignal <= -2) {
+        reasons.push("This cuisine has been a weaker fit in your prior ratings.");
+      }
+    }
+
+    const chainSignal = candidate.chain
+      ? number(profile.chainSignal, 0)
+      : number(profile.independentSignal, 0);
+    if (chainSignal !== 0) {
+      parts.push(clamp(75 + chainSignal * 5, 50, 96));
+      if (chainSignal >= 2) {
+        reasons.push(
+          candidate.chain
+            ? "Matches your positive chain-stop history."
+            : "Matches your positive independent-stop history."
+        );
+      }
+    }
+
+    if (candidate.quickStop && number(profile.quickSignal, 0) !== 0) {
+      parts.push(clamp(75 + number(profile.quickSignal, 0) * 5, 50, 96));
+    }
+
+    if (candidate.sitDown && number(profile.sitDownSignal, 0) !== 0) {
+      parts.push(clamp(75 + number(profile.sitDownSignal, 0) * 5, 50, 96));
+    }
+
+    if (candidate.localFavorite && number(profile.localSignal, 0) !== 0) {
+      parts.push(clamp(75 + number(profile.localSignal, 0) * 5, 50, 96));
+    }
+
+    if (
+      candidate.regionalSpecialty &&
+      number(profile.regionalSignal, 0) !== 0
+    ) {
+      parts.push(clamp(75 + number(profile.regionalSignal, 0) * 5, 50, 96));
+    }
+
+    if (!parts.length) {
+      return { score: 75, reasons: [], hasSignal: false };
+    }
+
+    return {
+      score: parts.reduce((sum, value) => sum + value, 0) / parts.length,
+      reasons,
+      hasSignal: true
+    };
+  }
+
+  function normalizePreferenceKey(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
   }
 
   function scoreAddedTime(added, maxAdded) {

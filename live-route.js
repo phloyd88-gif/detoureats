@@ -1,4 +1,4 @@
-/* DetourEats v1.2 Beta live route and discovery module
+/* DetourEats v1.5 Beta live route and discovery module
    No account or API token is required.
 
    Prototype services:
@@ -21,10 +21,14 @@
     "https://overpass.kumi.systems/api/interpreter"
   ];
   const GEOCODE_DELAY_MS = 1100;
-  const DISCOVERY_RADIUS_METERS = 5000;
-  const MAX_ROUTE_SAMPLES = 14;
-  const MAX_DISCOVERED_CANDIDATES = 20;
-  const MAX_ROUTED_CANDIDATES = 24;
+  // Search a continuous corridor approximately five miles on either
+  // side of the route. Actual via-route detour calculations still decide
+  // whether a restaurant is practical.
+  const DISCOVERY_RADIUS_METERS = 8000;
+  const MAX_ROUTE_SAMPLES = 28;
+  const ROUTE_SAMPLE_SPACING_METERS = 35000;
+  const MAX_DISCOVERED_CANDIDATES = 24;
+  const MAX_ROUTED_CANDIDATES = 28;
 
   const KNOWN_CHAINS = [
     "mcdonald", "burger king", "wendy", "taco bell", "kfc",
@@ -450,6 +454,8 @@
         discoveredCount: routedDiscovered,
         curatedCount: routedCurated,
         discoveryStatus: session.discoveryStatus,
+        searchRadiusMiles: metersToMiles(DISCOVERY_RADIUS_METERS),
+        searchMode: "continuous route corridor",
         updatedAt: Date.now()
       }
     };
@@ -515,16 +521,16 @@
   }
 
   function buildOverpassQuery(samples) {
-    const clauses = samples.map(point => {
-      const lat = Number(point[1]).toFixed(6);
-      const lon = Number(point[0]).toFixed(6);
-      return `nwr(around:${DISCOVERY_RADIUS_METERS},${lat},${lon})["amenity"~"^(restaurant|fast_food|cafe)$"]["name"];`;
-    });
+    const path = samples
+      .map(point =>
+        `${Number(point[1]).toFixed(6)},${Number(point[0]).toFixed(6)}`
+      )
+      .join(",");
 
-    return `[out:json][timeout:35];
-(
-${clauses.join("\n")}
-);
+    return `[out:json][timeout:45];
+nwr(around:${DISCOVERY_RADIUS_METERS},${path})
+  ["amenity"~"^(restaurant|fast_food|cafe)$"]
+  ["name"];
 out center tags meta;`;
   }
 
@@ -755,8 +761,8 @@ out center tags meta;`;
     }
 
     const sampleCount = clamp(
-      Math.ceil(total / 70000) + 1,
-      5,
+      Math.ceil(total / ROUTE_SAMPLE_SPACING_METERS) + 1,
+      6,
       MAX_ROUTE_SAMPLES
     );
     const samples = [];

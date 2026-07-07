@@ -1,4 +1,4 @@
-/* DetourEats v1.4 Beta app layer
+/* DetourEats v1.5 Beta app layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -30,6 +30,7 @@ const els = {
   familyFriendlyInput: document.getElementById("familyFriendlyInput"),
   currentTimeInput: document.getElementById("currentTimeInput"),
   startTripButton: document.getElementById("startTripButton"),
+  voiceToggleButton: document.getElementById("voiceToggleButton"),
   enableNotificationsButton: document.getElementById("enableNotificationsButton"),
   backButton: document.getElementById("backButton"),
   tripTitle: document.getElementById("tripTitle"),
@@ -42,6 +43,7 @@ const els = {
   routeRemainingText: document.getElementById("routeRemainingText"),
   nextFoodZoneText: document.getElementById("nextFoodZoneText"),
   decisionCountdownText: document.getElementById("decisionCountdownText"),
+  tripAlertStatusText: document.getElementById("tripAlertStatusText"),
   decisionCard: document.getElementById("decisionCard"),
   decisionConsequencePanel: document.getElementById("decisionConsequencePanel"),
   tripTimelinePanel: document.getElementById("tripTimelinePanel"),
@@ -54,6 +56,21 @@ const els = {
   whyButton: document.getElementById("whyButton"),
   fasterButton: document.getElementById("fasterButton"),
   recheckRouteButton: document.getElementById("recheckRouteButton"),
+  rateLastStopButton: document.getElementById("rateLastStopButton"),
+  stopFeedbackPanel: document.getElementById("stopFeedbackPanel"),
+  feedbackQuestion: document.getElementById("feedbackQuestion"),
+  feedbackPrimaryActions: document.getElementById("feedbackPrimaryActions"),
+  feedbackReasonArea: document.getElementById("feedbackReasonArea"),
+  feedbackReasonButtons: document.getElementById("feedbackReasonButtons"),
+  finishFeedbackButton: document.getElementById("finishFeedbackButton"),
+  closeFeedbackButton: document.getElementById("closeFeedbackButton"),
+  navigationModal: document.getElementById("navigationModal"),
+  navigationModalSummary: document.getElementById("navigationModalSummary"),
+  closeNavigationModalButton: document.getElementById("closeNavigationModalButton"),
+  googleMapsButton: document.getElementById("googleMapsButton"),
+  appleMapsButton: document.getElementById("appleMapsButton"),
+  rememberNavigationChoiceInput: document.getElementById("rememberNavigationChoiceInput"),
+  resetNavigationPreferenceButton: document.getElementById("resetNavigationPreferenceButton"),
   priorityChips: Array.from(document.querySelectorAll("[data-priority]")),
   skipReasonPanel: document.getElementById("skipReasonPanel"),
   closeSkipPanelButton: document.getElementById("closeSkipPanelButton"),
@@ -110,7 +127,14 @@ let state = {
   currentPick: null,
   currentResult: null,
   detailsOpen: false,
-  notificationsEnabled: false
+  notificationsEnabled: false,
+  voiceEnabled: false,
+  announcedAlertKeys: new Set(),
+  navigationPreference: "",
+  pendingNavigationPick: null,
+  pendingVisit: null,
+  activeFeedbackValue: "",
+  feedbackPromptShown: false
 };
 
 function getCandidates() {
@@ -140,6 +164,7 @@ function getEngineResult() {
     chainPolicy: state.chainPolicy,
     pricePreference: state.pricePreference,
     familyFriendly: state.familyFriendly,
+    learnedPreferences: getLearnedPreferenceProfile(),
     excludedCategories: Array.from(state.excludedCategories),
     deferUntilSeq: state.deferUntilSeq,
     minimumScore: state.minimumScore,
@@ -438,10 +463,13 @@ function render() {
   els.recheckRouteButton.disabled = state.routingBusy || state.routingMode !== "live";
   els.recheckRouteButton.classList.toggle("hidden", state.routingMode !== "live");
   els.recheckRouteButton.textContent = state.routingBusy ? "Rechecking…" : "Recheck Route";
-  els.takeMeThereButton.textContent = pick ? "Take Me There" : "Keep Watching";
+  els.rateLastStopButton.classList.toggle("hidden", !state.pendingVisit);
+  els.takeMeThereButton.textContent = pick ? "Add Stop & Navigate" : "Keep Watching";
   els.whyButton.textContent = state.detailsOpen ? "Hide Details" : "Tell Me Why";
   els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
   els.detailsPanel.classList.toggle("hidden", !state.detailsOpen);
+  updateTripAlertStatus();
+  maybeDeliverApproachAlert(pick, result);
 }
 
 function renderDriverStatus(pick, result, trip) {
@@ -1241,6 +1269,11 @@ function getPreferenceSummary() {
 
 const PREFERENCE_STORAGE_KEY = "detoureats_preferences_v1";
 const RECENT_TRIPS_STORAGE_KEY = "detoureats_recent_trips_v1";
+const VOICE_PREFERENCE_KEY = "detoureats_voice_preference_v1";
+const NOTIFICATION_PREFERENCE_KEY = "detoureats_notification_preference_v1";
+const NAVIGATION_PREFERENCE_KEY = "detoureats_navigation_preference_v1";
+const PENDING_VISIT_KEY = "detoureats_pending_visit_v1";
+const LEARNED_PREFERENCES_KEY = "detoureats_learned_preferences_v1";
 const MAX_RECENT_TRIPS = 5;
 
 function getRouteSignature() {
@@ -1398,7 +1431,7 @@ function renderRoutePreview(message = "") {
         <div><span>Distance</span><strong>${escapeHtml(String(Math.round(Number(metrics.totalMiles || metrics.remainingMiles || 0))))} mi</strong></div>
         <div><span>Food options</span><strong>${total}</strong></div>
       </div>
-      <p>${discovered} route-discovered · ${curated} curated</p>
+      <p>${discovered} route-discovered · ${curated} curated · approximately ${Number(metrics.searchRadiusMiles || 5).toFixed(0)} mi route corridor</p>
     </div>
   `;
 }
@@ -1540,6 +1573,24 @@ function applyExampleRoute(origin, destination) {
   invalidateRoutePreview();
 }
 
+function loadSeamlessSettings() {
+  try {
+    state.voiceEnabled =
+      localStorage.getItem(VOICE_PREFERENCE_KEY) === "enabled";
+    state.notificationsEnabled =
+      localStorage.getItem(NOTIFICATION_PREFERENCE_KEY) === "enabled" &&
+      "Notification" in window &&
+      Notification.permission === "granted";
+    state.navigationPreference =
+      localStorage.getItem(NAVIGATION_PREFERENCE_KEY) || "";
+    state.pendingVisit = loadPendingVisit();
+  } catch {
+    // Defaults remain active.
+  }
+
+  updateTripAlertStatus();
+}
+
 function savePreferences() {
   const preferences = {
     maxAdded: Number(els.maxAddedInput?.value || state.maxAdded || 10),
@@ -1628,6 +1679,8 @@ async function startTrip() {
   state.candidatePool = els.candidatePoolInput?.value || "All";
   state.hoursMode = els.hoursModeInput?.value || "requireOpen";
   state.skippedIds = new Set();
+  state.announcedAlertKeys = new Set();
+  state.feedbackPromptShown = false;
   savePreferences();
 
   state.liveSession = preview.session;
@@ -1785,15 +1838,165 @@ function takeMeThere() {
     return;
   }
 
-  const query = encodeURIComponent(pick.name);
-  const coordinateDestination = Array.isArray(pick.coordinates)
-    ? `${pick.coordinates[1]},${pick.coordinates[0]}`
-    : "";
-  const url = coordinateDestination
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(coordinateDestination)}&travelmode=driving`
-    : pick.mapsUrl || pick.url || `https://www.google.com/maps/search/?api=1&query=${query}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+  state.pendingNavigationPick = pick;
+
+  if (state.navigationPreference === "google") {
+    launchNavigation("google");
+    return;
+  }
+
+  if (state.navigationPreference === "apple") {
+    launchNavigation("apple");
+    return;
+  }
+
+  openNavigationModal(pick);
 }
+
+function openNavigationModal(pick) {
+  const destination = state.destination || "your original destination";
+  els.navigationModalSummary.textContent =
+    `${pick.name} will be inserted before ${destination}.`;
+  els.navigationModal.classList.remove("hidden");
+  els.resetNavigationPreferenceButton.classList.toggle(
+    "hidden",
+    !state.navigationPreference
+  );
+}
+
+function closeNavigationModal() {
+  els.navigationModal.classList.add("hidden");
+}
+
+function chooseNavigationProvider(provider) {
+  if (els.rememberNavigationChoiceInput.checked) {
+    state.navigationPreference = provider;
+    try {
+      localStorage.setItem(NAVIGATION_PREFERENCE_KEY, provider);
+    } catch {
+      // Preference remains available for this session.
+    }
+  }
+
+  launchNavigation(provider);
+}
+
+function launchNavigation(provider) {
+  const pick = state.pendingNavigationPick || state.currentPick;
+  if (!pick) return;
+
+  const url = provider === "apple"
+    ? buildAppleMapsUrl(pick)
+    : buildGoogleMapsUrl(pick);
+
+  rememberPendingVisit(pick);
+  closeNavigationModal();
+
+  showToast(
+    "Stop added",
+    `Opening ${provider === "apple" ? "Apple Maps" : "Google Maps"} with ${pick.name} before your final destination.`
+  );
+
+  window.location.href = url;
+}
+
+function buildGoogleMapsUrl(pick) {
+  const params = new URLSearchParams({
+    api: "1",
+    destination: getFinalDestinationValue(),
+    waypoints: getRestaurantNavigationValue(pick),
+    travelmode: "driving",
+    dir_action: "navigate",
+    utm_source: "DetourEats",
+    utm_campaign: "add_stop_navigation"
+  });
+
+  const origin = getNavigationOriginValue();
+  if (origin) params.set("origin", origin);
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function buildAppleMapsUrl(pick) {
+  const params = new URLSearchParams({
+    destination: getFinalDestinationValue(),
+    waypoint: getRestaurantNavigationValue(pick),
+    mode: "driving"
+  });
+
+  const origin = getNavigationOriginValue();
+  if (origin) params.set("source", origin);
+
+  return `https://maps.apple.com/directions?${params.toString()}`;
+}
+
+function getNavigationOriginValue() {
+  if (state.locationIsOrigin) return "";
+
+  const coordinates =
+    state.liveSession?.originCoordinates ||
+    state.originSelection?.coordinates;
+
+  return formatNavigationLocation(coordinates, state.origin);
+}
+
+function getFinalDestinationValue() {
+  const coordinates =
+    state.liveSession?.destinationCoordinates ||
+    state.destinationSelection?.coordinates;
+
+  return formatNavigationLocation(coordinates, state.destination);
+}
+
+function getRestaurantNavigationValue(pick) {
+  return formatNavigationLocation(
+    pick.coordinates,
+    pick.address || pick.name
+  );
+}
+
+function formatNavigationLocation(coordinates, fallback) {
+  if (Array.isArray(coordinates) && coordinates.length === 2) {
+    return `${Number(coordinates[1])},${Number(coordinates[0])}`;
+  }
+  return String(fallback || "");
+}
+
+function resetNavigationPreference() {
+  state.navigationPreference = "";
+  try {
+    localStorage.removeItem(NAVIGATION_PREFERENCE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+  els.resetNavigationPreferenceButton.classList.add("hidden");
+  showToast("Navigation choice reset", "DetourEats will ask next time.");
+}
+
+function rememberPendingVisit(pick) {
+  const pending = {
+    id: pick.id,
+    name: pick.name,
+    category: pick.category || pick.cuisine || "",
+    chain: Boolean(pick.chain),
+    quickStop: Boolean(pick.quickStop),
+    sitDown: Boolean(pick.sitDown),
+    localFavorite: Boolean(pick.localFavorite),
+    regionalSpecialty: Boolean(pick.regionalSpecialty),
+    estimatedAddedMinutes: Number(pick.added || pick.estimatedAddedMinutes || 0),
+    startedAt: Date.now()
+  };
+
+  state.pendingVisit = pending;
+  state.feedbackPromptShown = false;
+
+  try {
+    localStorage.setItem(PENDING_VISIT_KEY, JSON.stringify(pending));
+  } catch {
+    // Feedback remains available during this session.
+  }
+}
+
 
 async function requestCurrentLocation() {
   if (!navigator.geolocation) {
@@ -1960,22 +2163,402 @@ async function recheckRouteNow() {
 
 async function enableNotifications() {
   if (!("Notification" in window)) {
-    showToast("Notifications unavailable", "This browser does not support notifications.");
+    showToast("Alerts unavailable", "This browser does not support system notifications.");
     return;
   }
 
   const permission = await Notification.requestPermission();
   state.notificationsEnabled = permission === "granted";
 
+  try {
+    localStorage.setItem(
+      NOTIFICATION_PREFERENCE_KEY,
+      state.notificationsEnabled ? "enabled" : "disabled"
+    );
+  } catch {
+    // Preference remains for this session.
+  }
+
+  updateTripAlertStatus();
+
   if (state.notificationsEnabled) {
-    new Notification("DetourEats", {
-      body: "Test notification enabled. We’ll tell you when food is worth the stop.",
+    new Notification("DetourEats trip alerts are on", {
+      body: "We’ll alert you when a worthwhile food decision is approaching while DetourEats is active.",
       icon: "icons/icon-192.svg"
     });
+    showToast("Trip alerts enabled", "Approach alerts are ready.");
   } else {
-    showToast("Notifications not enabled", "You can still use the demo without notifications.");
+    showToast("Alerts not enabled", "Voice guidance can still be used.");
   }
 }
+
+function toggleVoiceGuidance() {
+  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+    showToast("Voice unavailable", "This browser does not support spoken guidance.");
+    return;
+  }
+
+  state.voiceEnabled = !state.voiceEnabled;
+
+  try {
+    localStorage.setItem(
+      VOICE_PREFERENCE_KEY,
+      state.voiceEnabled ? "enabled" : "disabled"
+    );
+  } catch {
+    // Preference remains for this session.
+  }
+
+  updateTripAlertStatus();
+
+  if (state.voiceEnabled) {
+    speakMessage(
+      "Voice guidance is on. I’ll tell you when a stop is worth it.",
+      { force: true }
+    );
+    showToast("Voice guidance on", "Recommendations will be spoken while DetourEats is active.");
+  } else {
+    window.speechSynthesis.cancel();
+    showToast("Voice guidance off", "Spoken recommendations are disabled.");
+  }
+}
+
+function updateTripAlertStatus() {
+  const voiceLabel = state.voiceEnabled ? "Voice on" : "Voice off";
+  const alertLabel = state.notificationsEnabled ? "alerts on" : "alerts off";
+
+  if (els.tripAlertStatusText) {
+    els.tripAlertStatusText.textContent = `${voiceLabel} · ${alertLabel}`;
+  }
+
+  if (els.voiceToggleButton) {
+    els.voiceToggleButton.textContent =
+      state.voiceEnabled ? "Turn Voice Off" : "Turn Voice On";
+  }
+
+  if (els.enableNotificationsButton) {
+    els.enableNotificationsButton.textContent =
+      state.notificationsEnabled ? "Alerts Enabled" : "Enable Alerts";
+  }
+}
+
+function maybeDeliverApproachAlert(pick, result) {
+  if (!state.started || !pick || Number(pick.score || 0) < 84) return;
+
+  const timing = getDecisionTiming(pick);
+  const minutes = pick.liveRoute
+    ? Number(pick.decisionMinutes ?? pick.minutesAhead ?? 999)
+    : estimateMinutesAhead(pick);
+
+  let stage = "";
+  if (minutes <= 1) stage = "now";
+  else if (minutes <= 5) stage = "soon";
+  else if (minutes <= 20) stage = "approaching";
+  else return;
+
+  const alertKey = `${pick.id}:${stage}`;
+  if (state.announcedAlertKeys.has(alertKey)) return;
+  state.announcedAlertKeys.add(alertKey);
+
+  const outlook = result?.routeOutlook?.label;
+  const message = buildApproachAlertMessage(pick, stage, outlook, timing);
+
+  if (state.voiceEnabled) {
+    speakMessage(message);
+  }
+
+  if (state.notificationsEnabled && Notification.permission === "granted") {
+    try {
+      new Notification(
+        stage === "now" ? "DetourEats: decide now" : "DetourEats: stop approaching",
+        {
+          body: message,
+          icon: "icons/icon-192.svg",
+          tag: alertKey,
+          renotify: stage === "now"
+        }
+      );
+    } catch {
+      // Some mobile browsers require service-worker notifications.
+    }
+  }
+
+  if (stage === "now" || stage === "soon") {
+    showToast(stage === "now" ? "Decision now" : "Stop approaching", message);
+  }
+}
+
+function buildApproachAlertMessage(pick, stage, outlook, timing) {
+  const added = Number(pick.added || 0);
+  const score = Number(pick.score || 0);
+  const routeContext = outlook ? ` ${outlook}.` : "";
+
+  if (stage === "now") {
+    return `${pick.name} is the decision now. Detour Score ${score}. It adds about ${added} minutes.${routeContext}`;
+  }
+
+  if (stage === "soon") {
+    return `${pick.name} is coming up soon. Detour Score ${score}, adding about ${added} minutes. ${timing.detail}`;
+  }
+
+  return `I found a worthwhile stop ahead. ${pick.name} has a Detour Score of ${score} and adds about ${added} minutes.${routeContext}`;
+}
+
+function speakMessage(message, options = {}) {
+  if (!state.voiceEnabled && !options.force) return;
+  if (!("speechSynthesis" in window)) return;
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(String(message || ""));
+  utterance.rate = 0.96;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+  window.speechSynthesis.speak(utterance);
+}
+
+function getLearnedPreferenceProfile() {
+  try {
+    const profile = JSON.parse(
+      localStorage.getItem(LEARNED_PREFERENCES_KEY) || "{}"
+    );
+    return profile && typeof profile === "object"
+      ? profile
+      : createEmptyPreferenceProfile();
+  } catch {
+    return createEmptyPreferenceProfile();
+  }
+}
+
+function createEmptyPreferenceProfile() {
+  return {
+    totalRatings: 0,
+    positiveRatings: 0,
+    negativeRatings: 0,
+    categorySignals: {},
+    chainSignal: 0,
+    independentSignal: 0,
+    quickSignal: 0,
+    sitDownSignal: 0,
+    localSignal: 0,
+    regionalSignal: 0,
+    updatedAt: 0
+  };
+}
+
+function openStopFeedback() {
+  const pending = state.pendingVisit || loadPendingVisit();
+  if (!pending) {
+    showToast("Nothing to rate", "Choose Add Stop & Navigate first.");
+    return;
+  }
+
+  state.pendingVisit = pending;
+  state.activeFeedbackValue = "";
+  els.feedbackQuestion.textContent = `Was ${pending.name} worth the detour?`;
+  els.feedbackPrimaryActions.classList.remove("hidden");
+  els.feedbackReasonArea.classList.add("hidden");
+  els.stopFeedbackPanel.classList.remove("hidden");
+  state.feedbackPromptShown = true;
+}
+
+function closeStopFeedback() {
+  els.stopFeedbackPanel.classList.add("hidden");
+}
+
+function recordPrimaryFeedback(value) {
+  const pending = state.pendingVisit || loadPendingVisit();
+  if (!pending) return;
+
+  if (value === "did-not-stop") {
+    clearPendingVisit();
+    closeStopFeedback();
+    showToast("No rating recorded", "That stop will not affect your preferences.");
+    render();
+    return;
+  }
+
+  state.activeFeedbackValue = value;
+  updatePreferenceProfile(pending, value, "");
+  renderFeedbackReasons(value);
+  els.feedbackPrimaryActions.classList.add("hidden");
+  els.feedbackReasonArea.classList.remove("hidden");
+
+  showToast(
+    "Preference updated",
+    value === "positive"
+      ? "DetourEats will favor similar stops slightly more."
+      : "DetourEats will favor similar stops slightly less."
+  );
+}
+
+function renderFeedbackReasons(value) {
+  const reasons = value === "positive"
+    ? [
+        ["great-food", "Great food"],
+        ["easy-stop", "Easy stop"],
+        ["worth-detour", "Worth the detour"],
+        ["right-vibe", "Right kind of place"]
+      ]
+    : [
+        ["bad-food-fit", "Food wasn’t for me"],
+        ["too-much-detour", "Too much detour"],
+        ["too-slow", "Too slow"],
+        ["closed-wrong", "Closed or incorrect"]
+      ];
+
+  els.feedbackReasonButtons.innerHTML = reasons.map(([key, label]) => `
+    <button type="button" data-feedback-reason="${escapeHtml(key)}">
+      ${escapeHtml(label)}
+    </button>
+  `).join("");
+
+  els.feedbackReasonButtons.querySelectorAll("[data-feedback-reason]").forEach(button => {
+    button.addEventListener("click", () => {
+      const pending = state.pendingVisit || loadPendingVisit();
+      if (!pending) return;
+      updatePreferenceProfile(
+        pending,
+        state.activeFeedbackValue,
+        button.dataset.feedbackReason
+      );
+      button.classList.add("selected");
+      button.disabled = true;
+    });
+  });
+}
+
+function updatePreferenceProfile(pending, value, reason) {
+  const profile = getLearnedPreferenceProfile();
+  const delta = value === "positive" ? 1 : -1;
+  const categoryKey = normalizePreferenceCategory(pending.category);
+
+  if (!reason) {
+    profile.totalRatings = Number(profile.totalRatings || 0) + 1;
+    if (delta > 0) {
+      profile.positiveRatings = Number(profile.positiveRatings || 0) + 1;
+    } else {
+      profile.negativeRatings = Number(profile.negativeRatings || 0) + 1;
+    }
+
+    if (categoryKey) {
+      profile.categorySignals[categoryKey] = clampPreferenceSignal(
+        Number(profile.categorySignals[categoryKey] || 0) + delta
+      );
+    }
+
+    if (pending.chain) {
+      profile.chainSignal = clampPreferenceSignal(
+        Number(profile.chainSignal || 0) + delta
+      );
+    } else {
+      profile.independentSignal = clampPreferenceSignal(
+        Number(profile.independentSignal || 0) + delta
+      );
+    }
+
+    if (pending.quickStop) {
+      profile.quickSignal = clampPreferenceSignal(
+        Number(profile.quickSignal || 0) + delta
+      );
+    }
+    if (pending.sitDown) {
+      profile.sitDownSignal = clampPreferenceSignal(
+        Number(profile.sitDownSignal || 0) + delta
+      );
+    }
+    if (pending.localFavorite) {
+      profile.localSignal = clampPreferenceSignal(
+        Number(profile.localSignal || 0) + delta
+      );
+    }
+    if (pending.regionalSpecialty) {
+      profile.regionalSignal = clampPreferenceSignal(
+        Number(profile.regionalSignal || 0) + delta
+      );
+    }
+  } else {
+    if (reason === "great-food" || reason === "right-vibe") {
+      if (categoryKey) {
+        profile.categorySignals[categoryKey] = clampPreferenceSignal(
+          Number(profile.categorySignals[categoryKey] || 0) + 1
+        );
+      }
+    } else if (reason === "easy-stop") {
+      profile.quickSignal = clampPreferenceSignal(
+        Number(profile.quickSignal || 0) + 1
+      );
+    } else if (reason === "bad-food-fit") {
+      if (categoryKey) {
+        profile.categorySignals[categoryKey] = clampPreferenceSignal(
+          Number(profile.categorySignals[categoryKey] || 0) - 1
+        );
+      }
+    } else if (reason === "too-slow") {
+      profile.quickSignal = clampPreferenceSignal(
+        Number(profile.quickSignal || 0) + 1
+      );
+      profile.sitDownSignal = clampPreferenceSignal(
+        Number(profile.sitDownSignal || 0) - 1
+      );
+    }
+  }
+
+  profile.updatedAt = Date.now();
+
+  try {
+    localStorage.setItem(LEARNED_PREFERENCES_KEY, JSON.stringify(profile));
+  } catch {
+    // Learning remains best-effort in the browser beta.
+  }
+}
+
+function normalizePreferenceCategory(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function clampPreferenceSignal(value) {
+  return Math.max(-5, Math.min(5, Number(value || 0)));
+}
+
+function finishFeedback() {
+  clearPendingVisit();
+  closeStopFeedback();
+  render();
+}
+
+function loadPendingVisit() {
+  try {
+    const pending = JSON.parse(localStorage.getItem(PENDING_VISIT_KEY) || "null");
+    return pending && pending.name ? pending : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingVisit() {
+  state.pendingVisit = null;
+  state.activeFeedbackValue = "";
+  try {
+    localStorage.removeItem(PENDING_VISIT_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function maybePromptForStopFeedback() {
+  const pending = state.pendingVisit || loadPendingVisit();
+  if (!pending || state.feedbackPromptShown || !state.started) return;
+
+  const elapsed = Date.now() - Number(pending.startedAt || 0);
+  if (elapsed < 8 * 60 * 1000) return;
+
+  state.pendingVisit = pending;
+  openStopFeedback();
+}
+
 
 function updateFromControls() {
   state.routePosition = Number(els.routePositionInput?.value || 0);
@@ -2060,6 +2643,7 @@ const destinationAutocomplete = window.DetourEatsAddressSearch?.createAutocomple
 });
 
 els.startTripButton.addEventListener("click", startTrip);
+els.voiceToggleButton.addEventListener("click", toggleVoiceGuidance);
 els.previewRouteButton.addEventListener("click", () => {
   previewSelectedRoute().catch(() => {});
 });
@@ -2104,6 +2688,21 @@ document.querySelectorAll("[data-skip-reason]").forEach(button => {
   button.addEventListener("click", () => applySkipReason(button.dataset.skipReason));
 });
 els.takeMeThereButton.addEventListener("click", takeMeThere);
+els.rateLastStopButton.addEventListener("click", openStopFeedback);
+els.closeFeedbackButton.addEventListener("click", closeStopFeedback);
+els.finishFeedbackButton.addEventListener("click", finishFeedback);
+els.feedbackPrimaryActions.querySelectorAll("[data-feedback-value]").forEach(button => {
+  button.addEventListener("click", () => {
+    recordPrimaryFeedback(button.dataset.feedbackValue);
+  });
+});
+els.closeNavigationModalButton.addEventListener("click", closeNavigationModal);
+els.googleMapsButton.addEventListener("click", () => chooseNavigationProvider("google"));
+els.appleMapsButton.addEventListener("click", () => chooseNavigationProvider("apple"));
+els.resetNavigationPreferenceButton.addEventListener("click", resetNavigationPreference);
+els.navigationModal.addEventListener("click", event => {
+  if (event.target === els.navigationModal) closeNavigationModal();
+});
 els.whyButton.addEventListener("click", toggleWhyDetails);
 els.fasterButton.addEventListener("click", eatSooner);
 els.recheckRouteButton.addEventListener("click", recheckRouteNow);
@@ -2141,7 +2740,14 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
 });
 
 window.addEventListener("beforeunload", stopLocationWatch);
+window.addEventListener("focus", maybePromptForStopFeedback);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    maybePromptForStopFeedback();
+  }
+});
 loadPreferences();
+loadSeamlessSettings();
 renderRecentTrips();
 renderRoutePreview();
 registerServiceWorker();
