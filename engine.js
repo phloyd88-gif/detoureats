@@ -38,10 +38,17 @@ It is restaurant quality filtered through trip fit.
         .filter(c =>
           c.openAtArrival !== false &&
           c.restaurantQuality >= 72 &&
-          c.detourScore >= 76
+          c.detourScore >= 74
         )
         .sort((a, b) => {
-          if (a.seq !== b.seq) return a.seq - b.seq;
+          const aSeq = Number(a.seq ?? 999);
+          const bSeq = Number(b.seq ?? 999);
+          if (aSeq !== bSeq) return aSeq - bSeq;
+
+          const aAdded = Number(a.estimatedAddedMinutes ?? 999);
+          const bAdded = Number(b.estimatedAddedMinutes ?? 999);
+          if (aAdded !== bAdded) return aAdded - bAdded;
+
           return b.detourScore - a.detourScore;
         })[0];
 
@@ -50,16 +57,32 @@ It is restaurant quality filtered through trip fit.
       }
     }
 
-    const decision = buildDecisionMessage(pick, scored, urgency, routeContext, settings);
+    const rankedEligible = chooseByChainPolicy(
+      eligible.length ? eligible : scored,
+      settings
+    );
+    const nextAlternative = findNextAlternative(pick, rankedEligible, settings);
+    const routeOutlook = buildRouteOutlook(pick, nextAlternative, rankedEligible, settings);
+    const decision = buildDecisionMessage(
+      pick,
+      scored,
+      urgency,
+      routeContext,
+      settings,
+      nextAlternative,
+      routeOutlook
+    );
 
     return {
       pick,
-      upcoming: chooseByChainPolicy(eligible.length ? eligible : scored, settings).slice(0, 6),
+      upcoming: rankedEligible.slice(0, 6),
       evaluated: scored,
       explanation: pick ? pick.scoreExplanation : null,
       reason: pick ? "recommended" : "no_candidate_available",
       urgency,
       routeContext,
+      routeOutlook,
+      nextAlternative,
       decision
     };
   }
@@ -519,7 +542,119 @@ It is restaurant quality filtered through trip fit.
     };
   }
 
-  function buildDecisionMessage(pick, scored, urgency, routeContext, settings) {
+  function findNextAlternative(pick, rankedCandidates, settings) {
+    if (!pick) return rankedCandidates[0] || null;
+
+    return rankedCandidates
+      .filter(candidate =>
+        candidate.id !== pick.id &&
+        candidate.openAtArrival !== false &&
+        Number(candidate.seq) > Number(pick.seq)
+      )
+      .sort((a, b) => {
+        const seqGap = Number(a.seq) - Number(b.seq);
+        if (seqGap !== 0) return seqGap;
+        return Number(b.detourScore) - Number(a.detourScore);
+      })[0] || null;
+  }
+
+  function buildRouteOutlook(pick, nextAlternative, rankedCandidates, settings) {
+    if (!pick) {
+      return {
+        level: "Watching",
+        label: "No decision yet",
+        stopMessage: "DetourEats is still watching the route.",
+        skipMessage: "No qualifying stop is ready yet."
+      };
+    }
+
+    const routePosition = number(settings.routePosition, 0);
+    const currentSeq = number(pick.seq, routePosition);
+    const nextSeq = nextAlternative ? number(nextAlternative.seq, currentSeq + 1) : null;
+    const segmentGap = nextSeq === null ? null : Math.max(1, nextSeq - currentSeq);
+    const minutesPerSegment = 42;
+    const waitMinutes = segmentGap === null ? null : segmentGap * minutesPerSegment;
+    const scoreDifference = nextAlternative
+      ? number(nextAlternative.detourScore, 0) - number(pick.detourScore, 0)
+      : null;
+
+    let level = "Stable";
+    let label = "Options remain available";
+    let skipMessage = nextAlternative
+      ? `If you skip, ${nextAlternative.name} is roughly ${formatRouteMinutes(waitMinutes)} later.`
+      : "If you skip, there is no other qualifying stop in the current route window.";
+
+    if (!nextAlternative) {
+      level = "Sparse";
+      label = "Weak stretch ahead";
+    } else if (segmentGap >= 4) {
+      level = "Sparse";
+      label = "Long gap ahead";
+    } else if (scoreDifference >= 6) {
+      level = "Improving";
+      label = "Stronger option later";
+    } else if (scoreDifference <= -6) {
+      level = "Declining";
+      label = "Current stop is stronger";
+    } else if (segmentGap <= 2) {
+      level = "Healthy";
+      label = "Another option is close";
+    }
+
+    if (nextAlternative) {
+      if (scoreDifference >= 6) {
+        skipMessage =
+          `If you skip, ${nextAlternative.name} is about ${formatRouteMinutes(waitMinutes)} later and scores ${Math.abs(scoreDifference)} points higher.`;
+      } else if (scoreDifference <= -6) {
+        skipMessage =
+          `If you skip, the next qualifying stop is about ${formatRouteMinutes(waitMinutes)} later and scores ${Math.abs(scoreDifference)} points lower.`;
+      } else {
+        skipMessage =
+          `If you skip, ${nextAlternative.name} is about ${formatRouteMinutes(waitMinutes)} later with a similar score.`;
+      }
+    }
+
+    let stopMessage =
+      `Stop here and you can eat in about ${formatRouteMinutes(Math.max(8, segmentGap === null ? 18 : segmentGap * 12))}, with ${pick.estimatedAddedMinutes} minutes added to the trip.`;
+
+    if (level === "Sparse" || level === "Declining") {
+      stopMessage =
+        `This is the stronger decision now. The route gets weaker after this stop.`;
+    } else if (level === "Improving") {
+      stopMessage =
+        `This is good enough now, but a stronger option exists later if you are comfortable waiting.`;
+    }
+
+    return {
+      level,
+      label,
+      waitMinutes,
+      segmentGap,
+      scoreDifference,
+      nextAlternativeId: nextAlternative?.id || null,
+      stopMessage,
+      skipMessage
+    };
+  }
+
+  function formatRouteMinutes(totalMinutes) {
+    const minutes = Math.max(0, Math.round(number(totalMinutes, 0)));
+    if (minutes < 60) return `${minutes} minutes`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    if (!remainder) return `${hours} hour${hours === 1 ? "" : "s"}`;
+    return `${hours} hr ${remainder} min`;
+  }
+
+  function buildDecisionMessage(
+    pick,
+    scored,
+    urgency,
+    routeContext,
+    settings,
+    nextAlternative,
+    routeOutlook
+  ) {
     if (!pick) {
       return {
         state: "keep-driving",
@@ -528,9 +663,10 @@ It is restaurant quality filtered through trip fit.
       };
     }
 
-    const laterBetter = scored
-      .filter(c => c.seq > pick.seq && c.detourScore >= pick.detourScore + 5 && c.openAtArrival !== false)
-      .sort((a, b) => a.seq - b.seq)[0];
+    const laterBetter = nextAlternative &&
+      nextAlternative.detourScore >= pick.detourScore + 5
+        ? nextAlternative
+        : null;
 
     if (urgency.level === "Stop now" || routeContext.level === "Last strong option") {
       return {
@@ -554,7 +690,7 @@ It is restaurant quality filtered through trip fit.
       return {
         state: "keep-driving",
         headline: "Keep driving.",
-        detail: `A stronger option is coming up later: ${laterBetter.name}.`
+        detail: routeOutlook?.skipMessage || `A stronger option is coming up later: ${laterBetter.name}.`
       };
     }
 

@@ -26,11 +26,13 @@ const els = {
   nextFoodZoneText: document.getElementById("nextFoodZoneText"),
   decisionCountdownText: document.getElementById("decisionCountdownText"),
   decisionCard: document.getElementById("decisionCard"),
+  decisionConsequencePanel: document.getElementById("decisionConsequencePanel"),
   detailsPanel: document.getElementById("detailsPanel"),
   takeMeThereButton: document.getElementById("takeMeThereButton"),
   skipButton: document.getElementById("skipButton"),
   whyButton: document.getElementById("whyButton"),
   fasterButton: document.getElementById("fasterButton"),
+  priorityChips: Array.from(document.querySelectorAll("[data-priority]")),
   skipReasonPanel: document.getElementById("skipReasonPanel"),
   closeSkipPanelButton: document.getElementById("closeSkipPanelButton"),
   routePositionInput: document.getElementById("routePositionInput"),
@@ -365,6 +367,7 @@ function render() {
 
   renderDriverStatus(pick, result, trip);
   renderDecisionCard(pick, trip, copy);
+  renderDecisionConsequences(pick, result, trip);
   renderDetailsPanel(pick, trip, copy);
   renderUpcoming(upcoming.length ? upcoming : getFallbackUpcoming(pick));
 
@@ -372,6 +375,7 @@ function render() {
     els.routePositionLabel.textContent = describeRoutePosition();
   }
 
+  updatePriorityChips();
   els.takeMeThereButton.disabled = !pick;
   els.skipButton.disabled = !pick;
   els.whyButton.disabled = !pick;
@@ -497,9 +501,53 @@ function toggleWhyDetails() {
   }
 }
 
-function findSomethingFaster() {
-  if (!state.currentPick) return;
-  applySkipReason("need-faster");
+function eatSooner() {
+  state.tripMode = "hungry";
+  state.stopType = "either";
+  state.minimumScore = 0;
+  state.deferUntilSeq = Number(state.routePosition);
+  state.lastSkipAdjustment = "Eating priority changed to Eat soon.";
+
+  if (els.tripModeInput) {
+    els.tripModeInput.value = "hungry";
+  }
+
+  updatePriorityChips();
+  render();
+  showToast("Eat soon selected", "Now showing the earliest open stop that clears the quality bar.");
+}
+
+function setEatingPriority(priority) {
+  const allowed = new Set(["balanced", "hungry", "adventure"]);
+  if (!allowed.has(priority)) return;
+
+  state.tripMode = priority;
+  state.minimumScore = 0;
+
+  if (priority === "hungry") {
+    state.deferUntilSeq = Number(state.routePosition);
+    state.lastSkipAdjustment = "Eating priority changed to Eat soon.";
+  } else if (priority === "adventure") {
+    state.lastSkipAdjustment = "Eating priority changed to Worth waiting for.";
+  } else {
+    state.lastSkipAdjustment = "Eating priority changed to Best overall.";
+  }
+
+  if (els.tripModeInput) {
+    els.tripModeInput.value = priority;
+  }
+
+  updatePriorityChips();
+  render();
+  showToast("Eating priority updated", state.lastSkipAdjustment);
+}
+
+function updatePriorityChips() {
+  (els.priorityChips || []).forEach(button => {
+    const active = button.dataset.priority === state.tripMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
 }
 
 function renderDecisionCard(pick, trip, copy) {
@@ -564,6 +612,62 @@ function renderDecisionCard(pick, trip, copy) {
   `;
 }
 
+function renderDecisionConsequences(pick, result, trip) {
+  const panel = els.decisionConsequencePanel;
+  if (!panel) return;
+
+  if (!pick) {
+    panel.innerHTML = `
+      <div class="consequence-heading">
+        <span>Decision impact</span>
+        <strong>No decision needed yet</strong>
+      </div>
+      <p>DetourEats is still watching for the next stop that clears your quality bar.</p>
+    `;
+    return;
+  }
+
+  const outlook = result?.routeOutlook || {};
+  const next = normalizePick(result?.nextAlternative);
+  const waitText = outlook.waitMinutes
+    ? formatDuration(outlook.waitMinutes)
+    : "outside the current route window";
+
+  const nextScoreText = next
+    ? `Detour Score ${next.score}`
+    : "No qualifying alternative";
+
+  const scoreDifference = Number(outlook.scoreDifference);
+  let comparisonText = "Similar food decision";
+  if (Number.isFinite(scoreDifference) && scoreDifference >= 6) {
+    comparisonText = `${Math.abs(scoreDifference)} points stronger`;
+  } else if (Number.isFinite(scoreDifference) && scoreDifference <= -6) {
+    comparisonText = `${Math.abs(scoreDifference)} points weaker`;
+  }
+
+  panel.innerHTML = `
+    <div class="consequence-heading">
+      <span>Decision impact</span>
+      <strong>${escapeHtml(outlook.label || "Current route decision")}</strong>
+    </div>
+
+    <div class="consequence-grid">
+      <div class="consequence-option stop-option">
+        <span>Stop here</span>
+        <strong>${escapeHtml(pick.name)}</strong>
+        <p>${escapeHtml(outlook.stopMessage || `Adds ${pick.added} minutes to the trip.`)}</p>
+      </div>
+
+      <div class="consequence-option skip-option">
+        <span>Skip and wait</span>
+        <strong>${escapeHtml(next?.name || "No next stop")}</strong>
+        <p>${escapeHtml(outlook.skipMessage || "No qualifying alternative is currently available.")}</p>
+        <small>${escapeHtml(next ? `${waitText} · ${nextScoreText} · ${comparisonText}` : nextScoreText)}</small>
+      </div>
+    </div>
+  `;
+}
+
 function renderDetailsPanel(pick, trip, copy) {
   const rationale = copy.rationale || [];
   if (!pick) {
@@ -623,6 +727,7 @@ function renderDetailsPanel(pick, trip, copy) {
         <div><span>Route outlook</span><strong>${escapeHtml(state.currentResult?.routeContext?.level || "Unknown")}</strong></div>
         <div><span>Style applied</span><strong>${escapeHtml(formatPreferenceLabel(state.tripMode))}</strong></div>
         <div><span>Preferences</span><strong>${escapeHtml(getPreferenceSummary())}</strong></div>
+        <div><span>Route outlook</span><strong>${escapeHtml(state.currentResult?.routeOutlook?.label || "Watching")}</strong></div>
       </div>
       <p>${escapeHtml(state.currentResult?.routeContext?.message || "")}</p>
       ${state.lastSkipAdjustment ? `<p class="adjustment-note"><strong>Adjusted:</strong> ${escapeHtml(state.lastSkipAdjustment)}</p>` : ""}
@@ -675,10 +780,10 @@ function describeRoutePosition() {
 
 function formatPreferenceLabel(value) {
   const labels = {
-    balanced: "Balanced",
-    adventure: "Food adventure",
-    strict: "Food adventure",
-    hungry: "Hungry soon",
+    balanced: "Best overall",
+    adventure: "Worth waiting for",
+    strict: "Worth waiting for",
+    hungry: "Eat soon",
     either: "Either",
     quick: "Quick stop",
     sitdown: "Sit-down",
@@ -705,6 +810,60 @@ function getPreferenceSummary() {
   if (state.familyFriendly) parts.push("Family-friendly");
 
   return parts.join(" · ");
+}
+
+const PREFERENCE_STORAGE_KEY = "detoureats_preferences_v1";
+
+function savePreferences() {
+  const preferences = {
+    maxAdded: Number(els.maxAddedInput?.value || state.maxAdded || 10),
+    tripMode: els.tripModeInput?.value || state.tripMode || "balanced",
+    stopType: els.stopTypeInput?.value || state.stopType || "either",
+    foodPreference: els.foodPreferenceInput?.value || state.foodPreference || "anything",
+    chainPolicy: els.chainPolicyInput?.value || state.chainPolicy || "avoid",
+    pricePreference: els.pricePreferenceInput?.value || state.pricePreference || "any",
+    familyFriendly: Boolean(els.familyFriendlyInput?.checked)
+  };
+
+  try {
+    localStorage.setItem(PREFERENCE_STORAGE_KEY, JSON.stringify(preferences));
+  } catch {
+    // The app still works if browser storage is unavailable.
+  }
+}
+
+function loadPreferences() {
+  let saved = null;
+
+  try {
+    saved = JSON.parse(localStorage.getItem(PREFERENCE_STORAGE_KEY) || "null");
+  } catch {
+    saved = null;
+  }
+
+  if (!saved) return;
+
+  if (els.maxAddedInput && Number.isFinite(Number(saved.maxAdded))) {
+    els.maxAddedInput.value = String(saved.maxAdded);
+  }
+  if (els.tripModeInput && saved.tripMode) {
+    els.tripModeInput.value = saved.tripMode;
+  }
+  if (els.stopTypeInput && saved.stopType) {
+    els.stopTypeInput.value = saved.stopType;
+  }
+  if (els.foodPreferenceInput && saved.foodPreference) {
+    els.foodPreferenceInput.value = saved.foodPreference;
+  }
+  if (els.chainPolicyInput && saved.chainPolicy) {
+    els.chainPolicyInput.value = saved.chainPolicy;
+  }
+  if (els.pricePreferenceInput && saved.pricePreference) {
+    els.pricePreferenceInput.value = saved.pricePreference;
+  }
+  if (els.familyFriendlyInput) {
+    els.familyFriendlyInput.checked = Boolean(saved.familyFriendly);
+  }
 }
 
 function showToast(title, message) {
@@ -735,6 +894,7 @@ function startTrip() {
   state.candidatePool = els.candidatePoolInput?.value || "All";
   state.hoursMode = els.hoursModeInput?.value || "requireOpen";
   state.skippedIds = new Set();
+  savePreferences();
 
   els.setupScreen.classList.add("hidden");
   els.driveScreen.classList.remove("hidden");
@@ -886,7 +1046,10 @@ document.querySelectorAll("[data-skip-reason]").forEach(button => {
 });
 els.takeMeThereButton.addEventListener("click", takeMeThere);
 els.whyButton.addEventListener("click", toggleWhyDetails);
-els.fasterButton.addEventListener("click", findSomethingFaster);
+els.fasterButton.addEventListener("click", eatSooner);
+(els.priorityChips || []).forEach(button => {
+  button.addEventListener("click", () => setEatingPriority(button.dataset.priority));
+});
 els.enableNotificationsButton.addEventListener("click", enableNotifications);
 els.demoToggleButton.addEventListener("click", toggleDemoControls);
 
@@ -909,8 +1072,10 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
     if (state.started) updateFromControls();
   });
   el.addEventListener("change", () => {
+    savePreferences();
     if (state.started) updateFromControls();
   });
 });
 
+loadPreferences();
 registerServiceWorker();

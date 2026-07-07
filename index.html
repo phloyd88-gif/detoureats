@@ -47,11 +47,11 @@
           </label>
 
           <label>
-            Style
+            Eating priority
             <select id="tripModeInput">
-              <option value="balanced" selected>Balanced</option>
-              <option value="adventure">Food adventure</option>
-              <option value="hungry">Hungry soon</option>
+              <option value="balanced" selected>Best overall</option>
+              <option value="hungry">Eat soon</option>
+              <option value="adventure">Worth waiting for</option>
             </select>
           </label>
         </div>
@@ -148,6 +148,16 @@
       </div>
 
 
+
+      <section class="drive-priority-panel" aria-label="Eating priority">
+        <span>Eating priority</span>
+        <div class="priority-chip-row">
+          <button type="button" class="priority-chip active" data-priority="balanced">Best overall</button>
+          <button type="button" class="priority-chip" data-priority="hungry">Eat soon</button>
+          <button type="button" class="priority-chip" data-priority="adventure">Worth waiting for</button>
+        </div>
+      </section>
+
       <section id="driverStatusPanel" class="driver-status-panel" aria-label="Trip progress">
         <div class="driver-status-top">
           <div>
@@ -175,6 +185,9 @@
 
       <div id="decisionCard" class="decision-card"></div>
 
+      <section id="decisionConsequencePanel" class="decision-consequence-panel" aria-live="polite"></section>
+
+
       <div class="button-row driver-primary-actions">
         <button id="takeMeThereButton" class="primary">Take Me There</button>
         <button id="skipButton" class="secondary">Skip</button>
@@ -182,7 +195,7 @@
 
       <div class="driver-secondary-actions">
         <button id="whyButton" class="driver-action" type="button" aria-expanded="false">Tell Me Why</button>
-        <button id="fasterButton" class="driver-action" type="button">Find Something Faster</button>
+        <button id="fasterButton" class="driver-action" type="button">Eat Sooner</button>
       </div>
 
 

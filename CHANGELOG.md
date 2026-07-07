@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9
+- Added Stop Here versus Skip and Wait decision consequences.
+- Added the next qualifying restaurant, approximate wait, score comparison, and route outlook.
+- Added stronger stop-or-wait messaging based on what comes next.
+- Added browser persistence for trip preferences.
+- Built from the stable v0.8.1 interface with no API or account requirement.
+
+
+## v0.8.1
+- Renamed Style to Eating Priority.
+- Added in-drive priority controls.
+- Replaced Find Something Faster with Eat Sooner.
+- Fixed Eat Sooner so it favors the earliest qualifying open stop and does not automatically skip the current recommendation.
+- Renamed modes to Best overall, Eat soon, and Worth waiting for.
+
+
 ## v0.8
 - Added Driver Mode route-progress panel.
 - Added simulated remaining time, next food zone, and decision countdown.

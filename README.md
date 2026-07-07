@@ -1,4 +1,4 @@
-# DetourEats App v0.8
+# DetourEats App v0.9
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -226,3 +226,39 @@ Added:
 Important:
 - Route progress, remaining time, and decision countdown remain prototype estimates.
 - Live GPS, exits, traffic, and route calculations are planned for a later version.
+
+
+## v0.8.1: Eating Priority and Eat Sooner fix
+
+Changes:
+- Renamed Style to Eating Priority
+- Renamed options:
+  - Best overall
+  - Eat soon
+  - Worth waiting for
+- Added Eating Priority controls directly to Driver Mode
+- Replaced Find Something Faster with Eat Sooner
+- Eat Sooner no longer skips the current stop automatically
+- Eat Sooner now selects the earliest open restaurant that clears the quality bar
+- If two candidates are at the same route position, the smaller estimated detour wins
+
+
+## v0.9: Decision Consequences
+
+This version adds visible product functionality without requiring any outside API or account.
+
+New:
+- Stop Here versus Skip and Wait comparison
+- Name and score of the next qualifying restaurant
+- Estimated wait until the next option
+- Clear indication when the next option is stronger, weaker, or similar
+- Route-outlook states:
+  - Another option is close
+  - Stronger option later
+  - Current stop is stronger
+  - Long gap ahead
+  - Weak stretch ahead
+- Decision messaging now considers the consequence of skipping
+- Trip preferences are remembered on the same browser
+
+The route timing is still simulated, but the new logic changes the recommendation explanation and gives the driver a concrete reason to stop or wait.
