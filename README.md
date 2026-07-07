@@ -1,4 +1,4 @@
-# DetourEats App v1.3 Beta
+# DetourEats App v1.4 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -396,3 +396,39 @@ detour calculations, and score guardrails as a current-location route.
 For arbitrary routes, DetourEats no longer silently substitutes the old
 Amsterdam-to-Myrtle Beach curated corridor. If a route cannot be verified, the
 app stays on setup and explains that the locations should be checked.
+
+
+## v1.4 Beta: Address Search
+
+Both Starting Point and Destination now support type-ahead place search.
+
+### Search behavior
+
+- Suggestions begin after three characters
+- Searches wait briefly while the user types instead of querying on every keystroke
+- Up to six U.S. matches are shown
+- Results can include:
+  - full addresses
+  - streets
+  - cities and towns
+  - landmarks
+  - named businesses and places
+- Keyboard controls:
+  - Up/Down selects a suggestion
+  - Enter confirms it
+  - Escape closes the list
+- Mobile users can tap a suggestion
+- The selected result stores exact longitude and latitude for route calculation
+- Selected addresses show a green confirmation state
+- Manual text entry remains available as a fallback
+- Recent trips retain selected endpoint coordinates when available
+
+### Prototype provider
+
+Autocomplete uses the public Photon demo service with conservative request
+controls, aborted superseded searches, and 24-hour browser caching. It does not
+require an account or API token.
+
+Photon is appropriate for beta testing but does not provide an availability
+guarantee. A production release should use a dedicated hosted or self-hosted
+autocomplete service.

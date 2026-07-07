@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4 Beta
+- Added address and place autocomplete to Starting Point and Destination.
+- Added selectable full-address, street, city, landmark, and business suggestions.
+- Added keyboard, mouse, and mobile selection support.
+- Added exact-coordinate routing from selected suggestions.
+- Added green selected-address confirmation and search status messages.
+- Added conservative debouncing, request cancellation, result limits, and browser caching.
+- Preserved manual-entry fallback when autocomplete is unavailable.
+- Preserved selected coordinates in recent typed trips and through route swapping.
+- Fixed Recheck Route for trips that begin from a typed starting point.
+
+
 ## v1.3 Beta
 - Added editable starting point and destination fields for arbitrary U.S. trips.
 - Added current location as an optional origin rather than a route requirement.

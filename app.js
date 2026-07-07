@@ -1,4 +1,4 @@
-/* DetourEats v1.3 Beta app layer
+/* DetourEats v1.4 Beta app layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -6,7 +6,11 @@ const els = {
   setupScreen: document.getElementById("setupScreen"),
   driveScreen: document.getElementById("driveScreen"),
   originInput: document.getElementById("originInput"),
+  originSuggestions: document.getElementById("originSuggestions"),
+  originSearchStatus: document.getElementById("originSearchStatus"),
   destinationInput: document.getElementById("destinationInput"),
+  destinationSuggestions: document.getElementById("destinationSuggestions"),
+  destinationSearchStatus: document.getElementById("destinationSearchStatus"),
   swapRouteButton: document.getElementById("swapRouteButton"),
   previewRouteButton: document.getElementById("previewRouteButton"),
   routePreviewCard: document.getElementById("routePreviewCard"),
@@ -68,6 +72,8 @@ let state = {
   started: false,
   origin: "",
   destination: "",
+  originSelection: null,
+  destinationSelection: null,
   locationEnabled: false,
   locationIsOrigin: false,
   routePreview: null,
@@ -1239,9 +1245,15 @@ const MAX_RECENT_TRIPS = 5;
 
 function getRouteSignature() {
   const originKey = state.locationIsOrigin && state.currentCoordinates
-    ? `gps:${state.currentCoordinates.map(value => Number(value).toFixed(4)).join(",")}`
-    : `text:${String(els.originInput?.value || "").trim().toLowerCase()}`;
-  const destinationKey = String(els.destinationInput?.value || "").trim().toLowerCase();
+    ? `gps:${state.currentCoordinates.map(value => Number(value).toFixed(5)).join(",")}`
+    : state.originSelection?.coordinates
+      ? `selected:${state.originSelection.coordinates.map(value => Number(value).toFixed(5)).join(",")}`
+      : `text:${String(els.originInput?.value || "").trim().toLowerCase()}`;
+
+  const destinationKey = state.destinationSelection?.coordinates
+    ? `selected:${state.destinationSelection.coordinates.map(value => Number(value).toFixed(5)).join(",")}`
+    : `text:${String(els.destinationInput?.value || "").trim().toLowerCase()}`;
+
   return `${originKey}|${destinationKey}|${Number(els.maxAddedInput?.value || 10)}`;
 }
 
@@ -1261,13 +1273,19 @@ function getRecentTrips() {
   }
 }
 
-function saveRecentTrip(origin, destination) {
-  if (!origin || !destination) return;
+function saveRecentTrip(origin, destination, originSelection = null, destinationSelection = null) {
+  if (!origin || !destination || origin === "Current location") return;
 
   const current = getRecentTrips();
   const normalized = `${origin.toLowerCase()}|${destination.toLowerCase()}`;
   const next = [
-    { origin, destination, savedAt: Date.now() },
+    {
+      origin,
+      destination,
+      originSelection,
+      destinationSelection,
+      savedAt: Date.now()
+    },
     ...current.filter(
       trip => `${String(trip.origin).toLowerCase()}|${String(trip.destination).toLowerCase()}` !== normalized
     )
@@ -1302,8 +1320,12 @@ function renderRecentTrips() {
       state.locationEnabled = false;
       state.locationIsOrigin = false;
       state.currentCoordinates = null;
+      state.originSelection = trip.originSelection || null;
+      state.destinationSelection = trip.destinationSelection || null;
       els.originInput.value = trip.origin;
       els.destinationInput.value = trip.destination;
+      originAutocomplete?.setSelectedValue(state.originSelection);
+      destinationAutocomplete?.setSelectedValue(state.destinationSelection);
       els.useLocationButton.textContent = "Use My Location";
       updateLocationSetup("Typed route selected", "Preview the route before starting.", "demo");
       invalidateRoutePreview();
@@ -1426,8 +1448,10 @@ async function previewSelectedRoute({ quiet = false } = {}) {
     return state.routePreview;
   }
 
-  state.origin = state.locationIsOrigin ? "Current location" : originText;
-  state.destination = destinationText;
+  state.origin = state.locationIsOrigin
+    ? "Current location"
+    : state.originSelection?.label || originText;
+  state.destination = state.destinationSelection?.label || destinationText;
   state.routePreviewStatus = "loading";
   setRouteSetupBusy(true, "Locating your route");
 
@@ -1436,9 +1460,14 @@ async function previewSelectedRoute({ quiet = false } = {}) {
       originCoordinates:
         state.locationIsOrigin && Array.isArray(state.currentCoordinates)
           ? state.currentCoordinates
-          : null,
+          : state.originSelection?.coordinates || null,
       originText: state.locationIsOrigin ? "" : originText,
+      originLabel: state.locationIsOrigin
+        ? "Current location"
+        : state.originSelection?.label || originText,
+      destinationCoordinates: state.destinationSelection?.coordinates || null,
       destinationText,
+      destinationLabel: state.destinationSelection?.label || destinationText,
       candidates: window.DETOUR_EATS_CANDIDATES || [],
       maxAddedMinutes: Number(els.maxAddedInput.value),
       progressCallback: message => {
@@ -1484,8 +1513,15 @@ function swapRoute() {
   }
 
   const origin = els.originInput.value;
+  const originSelection = state.originSelection;
+
   els.originInput.value = els.destinationInput.value;
   els.destinationInput.value = origin;
+  state.originSelection = state.destinationSelection;
+  state.destinationSelection = originSelection;
+
+  originAutocomplete?.setSelectedValue(state.originSelection);
+  destinationAutocomplete?.setSelectedValue(state.destinationSelection);
   invalidateRoutePreview();
 }
 
@@ -1493,6 +1529,10 @@ function applyExampleRoute(origin, destination) {
   state.locationEnabled = false;
   state.locationIsOrigin = false;
   state.currentCoordinates = null;
+  state.originSelection = null;
+  state.destinationSelection = null;
+  originAutocomplete?.clearSelection();
+  destinationAutocomplete?.clearSelection();
   els.originInput.value = origin;
   els.destinationInput.value = destination;
   els.useLocationButton.textContent = "Use My Location";
@@ -1600,7 +1640,12 @@ async function startTrip() {
     startLocationWatch();
   }
 
-  saveRecentTrip(state.origin, state.destination);
+  saveRecentTrip(
+    state.origin,
+    state.destination,
+    state.locationIsOrigin ? null : state.originSelection,
+    state.destinationSelection
+  );
   render();
 
   const count = Number(preview.snapshot?.metrics?.totalCandidates || 0);
@@ -1776,6 +1821,8 @@ async function requestCurrentLocation() {
     state.locationAccuracy = Number(position.coords.accuracy || 0);
     state.locationEnabled = true;
     state.locationIsOrigin = true;
+    state.originSelection = null;
+    originAutocomplete?.clearSelection();
     els.originInput.value = "Current location";
     invalidateRoutePreview();
 
@@ -1889,17 +1936,26 @@ async function refreshLiveRoute(coordinates) {
 }
 
 async function recheckRouteNow() {
+  const routeOrigin =
+    state.currentCoordinates ||
+    state.liveSession?.originCoordinates;
+
   if (
     state.routingMode !== "live" ||
     !state.liveSession ||
-    !state.currentCoordinates ||
+    !Array.isArray(routeOrigin) ||
     state.routingBusy
   ) {
     return;
   }
 
-  showToast("Rechecking route", "Updating timing and restaurant order from your current position.");
-  await refreshLiveRoute(state.currentCoordinates);
+  showToast(
+    "Rechecking route",
+    state.locationIsOrigin
+      ? "Updating timing and restaurant order from your current position."
+      : "Rechecking timing and restaurant order for the selected route."
+  );
+  await refreshLiveRoute(routeOrigin);
 }
 
 async function enableNotifications() {
@@ -1954,6 +2010,55 @@ function registerServiceWorker() {
   }
 }
 
+const originAutocomplete = window.DetourEatsAddressSearch?.createAutocomplete({
+  input: els.originInput,
+  menu: els.originSuggestions,
+  status: els.originSearchStatus,
+  getBiasCoordinates: () => state.currentCoordinates,
+  onSelect: selection => {
+    state.locationEnabled = false;
+    state.locationIsOrigin = false;
+    state.currentCoordinates = null;
+    state.originSelection = {
+      label: selection.label,
+      coordinates: selection.coordinates
+    };
+    els.useLocationButton.textContent = "Use My Location";
+    updateLocationSetup(
+      "Starting point selected",
+      "Exact coordinates are ready for route calculation.",
+      "live"
+    );
+    invalidateRoutePreview();
+  },
+  onManualInput: query => {
+    if (query !== state.originSelection?.label) {
+      state.originSelection = null;
+    }
+  }
+});
+
+const destinationAutocomplete = window.DetourEatsAddressSearch?.createAutocomplete({
+  input: els.destinationInput,
+  menu: els.destinationSuggestions,
+  status: els.destinationSearchStatus,
+  getBiasCoordinates: () =>
+    state.originSelection?.coordinates ||
+    state.currentCoordinates,
+  onSelect: selection => {
+    state.destinationSelection = {
+      label: selection.label,
+      coordinates: selection.coordinates
+    };
+    invalidateRoutePreview();
+  },
+  onManualInput: query => {
+    if (query !== state.destinationSelection?.label) {
+      state.destinationSelection = null;
+    }
+  }
+});
+
 els.startTripButton.addEventListener("click", startTrip);
 els.previewRouteButton.addEventListener("click", () => {
   previewSelectedRoute().catch(() => {});
@@ -1972,12 +2077,26 @@ els.originInput.addEventListener("input", () => {
     state.locationEnabled = false;
     state.locationIsOrigin = false;
     state.currentCoordinates = null;
+    if (els.originInput.value !== state.originSelection?.label) {
+      state.originSelection = null;
+    }
     els.useLocationButton.textContent = "Use My Location";
-    updateLocationSetup("Typed starting point", "Preview the route before starting.", "demo");
+    updateLocationSetup(
+      "Typed starting point",
+      state.originSelection
+        ? "Exact location selected."
+        : "Choose a suggestion for the most reliable routing.",
+      state.originSelection ? "live" : "demo"
+    );
   }
   invalidateRoutePreview();
 });
-els.destinationInput.addEventListener("input", invalidateRoutePreview);
+els.destinationInput.addEventListener("input", () => {
+  if (els.destinationInput.value !== state.destinationSelection?.label) {
+    state.destinationSelection = null;
+  }
+  invalidateRoutePreview();
+});
 els.backButton.addEventListener("click", goBack);
 els.skipButton.addEventListener("click", skipPick);
 els.closeSkipPanelButton?.addEventListener("click", closeSkipPanel);

@@ -1802,3 +1802,169 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* v1.4 Beta: address autocomplete */
+.address-field-label {
+  position: relative;
+}
+.address-input-shell {
+  position: relative;
+}
+.address-input-shell input[data-selected-address="true"] {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
+  padding-right: 36px;
+}
+.address-input-shell input[data-selected-address="true"]::selection {
+  background: #bbf7d0;
+}
+.address-input-shell:has(input[data-selected-address="true"])::after {
+  content: "✓";
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  z-index: 2;
+  transform: translateY(-50%);
+  color: #15803d;
+  font-size: 17px;
+  font-weight: 950;
+  pointer-events: none;
+}
+.address-search-status {
+  display: block;
+  min-height: 15px;
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.address-search-status.working {
+  color: #1d4ed8;
+}
+.address-search-status.success {
+  color: #475569;
+}
+.address-search-status.selected {
+  color: #15803d;
+  font-weight: 850;
+}
+.address-search-status.error {
+  color: #b45309;
+}
+.address-suggestions {
+  position: absolute;
+  z-index: 100;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  max-height: 330px;
+  overflow-y: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 15px;
+  background: #ffffff;
+  box-shadow:
+    0 20px 45px rgba(15, 23, 42, 0.18),
+    0 3px 10px rgba(15, 23, 42, 0.08);
+}
+.address-suggestion-results {
+  padding: 5px;
+}
+.address-suggestion {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  padding: 10px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+.address-suggestion:hover,
+.address-suggestion.active {
+  background: #f0fdf4;
+}
+.address-suggestion-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 9px;
+  background: #f1f5f9;
+  color: #166534;
+  font-size: 14px;
+  font-weight: 950;
+}
+.address-suggestion-copy {
+  min-width: 0;
+}
+.address-suggestion-copy strong,
+.address-suggestion-copy small {
+  display: block;
+}
+.address-suggestion-copy strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.address-suggestion-copy small {
+  overflow: hidden;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 9px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.address-suggestion-type {
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.address-suggestion-empty {
+  padding: 16px 14px 12px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.address-search-attribution {
+  padding: 7px 10px;
+  border-top: 1px solid #e2e8f0;
+  color: #94a3b8;
+  font-size: 8px;
+  font-weight: 700;
+  text-align: right;
+}
+.route-entry-card {
+  align-items: start;
+}
+.swap-route-button {
+  margin-top: 23px;
+}
+
+@media (max-width: 640px) {
+  .swap-route-button {
+    margin-top: -2px;
+  }
+  .address-suggestions {
+    max-height: 280px;
+  }
+  .address-suggestion {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+  .address-suggestion-type {
+    display: none;
+  }
+}

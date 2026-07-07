@@ -202,7 +202,10 @@
   async function buildLiveTrip({
     originCoordinates,
     originText,
+    originLabel,
+    destinationCoordinates,
     destinationText,
+    destinationLabel,
     candidates,
     maxAddedMinutes,
     progressCallback
@@ -218,8 +221,8 @@
     const origin = Array.isArray(originCoordinates)
       ? {
           coordinates: originCoordinates.map(Number),
-          precision: "device location",
-          label: "Current location"
+          precision: originText ? "address autocomplete" : "device location",
+          label: originLabel || originText || "Current location"
         }
       : await geocode(originText);
 
@@ -231,7 +234,13 @@
         ? [-78.8867, 33.6891]
         : null;
 
-    const destination = await geocode(destinationText, destinationFallback);
+    const destination = Array.isArray(destinationCoordinates)
+      ? {
+          coordinates: destinationCoordinates.map(Number),
+          precision: "address autocomplete",
+          label: destinationLabel || destinationText
+        }
+      : await geocode(destinationText, destinationFallback);
 
     if (distanceMeters(origin.coordinates, destination.coordinates) < 1500) {
       throw new Error("Starting point and destination are too close together.");

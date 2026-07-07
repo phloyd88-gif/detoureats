@@ -39,18 +39,40 @@
         </section>
 
         <section class="route-entry-card" aria-label="Trip route">
-          <label>
+          <label class="address-field-label">
             Starting point
-            <input id="originInput" type="text" value="" placeholder="City, address, or landmark" autocomplete="street-address">
+            <div class="address-input-shell">
+              <input
+                id="originInput"
+                type="text"
+                value=""
+                placeholder="Start typing an address, city, or place"
+                autocomplete="off"
+                spellcheck="false"
+              >
+              <div id="originSuggestions" class="address-suggestions hidden"></div>
+            </div>
+            <small id="originSearchStatus" class="address-search-status">Start typing an address, city, landmark, or business.</small>
           </label>
 
           <button id="swapRouteButton" class="swap-route-button" type="button" aria-label="Swap starting point and destination">
             ⇅ Swap
           </button>
 
-          <label>
+          <label class="address-field-label">
             Destination
-            <input id="destinationInput" type="text" value="" placeholder="City, address, or landmark" autocomplete="street-address">
+            <div class="address-input-shell">
+              <input
+                id="destinationInput"
+                type="text"
+                value=""
+                placeholder="Start typing an address, city, or place"
+                autocomplete="off"
+                spellcheck="false"
+              >
+              <div id="destinationSuggestions" class="address-suggestions hidden"></div>
+            </div>
+            <small id="destinationSearchStatus" class="address-search-status">Start typing an address, city, landmark, or business.</small>
           </label>
         </section>
 
@@ -334,6 +356,7 @@
   <script src="data.js"></script>
   <script src="engine.js"></script>
   <script src="live-route.js"></script>
+  <script src="address-search.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
