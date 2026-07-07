@@ -1,4 +1,4 @@
-# DetourEats App v1.8.5 Short Route Fallback
+# DetourEats App v1.8.6 Route Verification Fix
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -785,3 +785,15 @@ retries Overpass through multiple servers using POST and GET, and uses a bounded
 Nominatim fallback when Overpass is unavailable or sparse. Fallback results are
 restricted to the actual route corridor and still pass business-status,
 duplicate, matrix, and exact-detour validation.
+
+
+## v1.8.6: Route Verification Fix
+
+The short-route fallback previously ran three bounded local searches
+sequentially. When the primary restaurant provider failed, those requests could
+exceed the overall route setup timeout. The app then reported that it could not
+verify the route even though the driving route had already been calculated.
+
+This release runs local fallback categories concurrently, preserves a verified
+driving route when restaurant discovery fails, and separates driving-route
+validity from restaurant-provider availability.

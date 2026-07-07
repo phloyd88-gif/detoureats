@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.8.6 Route Verification Fix
+- Fixed short-route fallback requests exceeding the overall setup timeout.
+- Runs bounded local fallback categories concurrently.
+- Preserves a verified driving route when restaurant discovery is unavailable.
+- Separates driving-route validity from restaurant-provider availability.
+- Increased the bounded setup timeout to 70 seconds.
+- Replaced misleading route-verification errors with accurate search status.
+
+
 ## v1.8.5 Short Route Fallback
 - Added a dedicated local restaurant search for trips shorter than approximately 40 miles.
 - Searches compact origin, midpoint, and destination areas.

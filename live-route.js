@@ -1,4 +1,4 @@
-/* DetourEats v1.8.5 Short Route Fallback
+/* DetourEats v1.8.6 Route Verification Fix
    No account or API token is required.
 
    Prototype services:
@@ -43,7 +43,7 @@
 
   const SHORT_ROUTE_THRESHOLD_METERS = 65000;
   const SHORT_ROUTE_OVERPASS_BUDGET_MS = 18000;
-  const SHORT_ROUTE_NOMINATIM_TIMEOUT_MS = 8500;
+  const SHORT_ROUTE_NOMINATIM_TIMEOUT_MS = 6500;
   const SHORT_ROUTE_SEARCH_RADIUS_METERS = 7500;
   const NOMINATIM_FALLBACK_URL =
     "https://nominatim.openstreetmap.org/search";
@@ -477,16 +477,47 @@
         }
       );
     } catch (error) {
-      if (/canceled/i.test(error?.message || "")) {
+      if (
+        /canceled/i.test(error?.message || "") &&
+        !/timed out/i.test(error?.message || "")
+      ) {
         throw error;
       }
+
       console.warn(
-        "Restaurant discovery unavailable:",
+        "Restaurant discovery unavailable; retaining verified driving route:",
         error
       );
-      discovery.plan.status = "unavailable";
-      discovery.plan.summary =
-        "The driving route is ready, but restaurant discovery did not respond.";
+
+      discovery = {
+        candidates: [],
+        plan: {
+          ...createDefaultDiscoveryPlan(
+            tripMode
+          ),
+          status: "unavailable",
+          label:
+            "Driving route verified · restaurant search unavailable",
+          summary:
+            "The driving route is valid, but restaurant discovery did not respond."
+        },
+        diagnostics: {
+          status: "unavailable",
+          totalChunks: 0,
+          completedChunks: 0,
+          failedChunks: 1,
+          cachedChunks: 0,
+          rawElements: 0,
+          practicalElements: 0,
+          extendedElements: 0,
+          destinationElements: 0,
+          exceptionalElements: 0,
+          statusExcluded: 0,
+          knownClosedExcluded: 0,
+          staleExcluded: 0,
+          routeVerified: true
+        }
+      };
     }
 
     assertBuildActive(buildGeneration);
@@ -830,6 +861,10 @@
         exactRoutingStatus:
           routing.exactRoutingStatus,
         searchOutcome,
+        routeVerified: true,
+        restaurantSearchFailed:
+          session.discoveryStatus ===
+          "unavailable",
         shortRouteSearch:
           Boolean(
             session.discoveryDiagnostics
@@ -2392,49 +2427,59 @@
       "cafe",
       "fast food"
     ];
-    const results = [];
 
-    for (const category of categories) {
-      assertBuildActive(buildGeneration);
+    const settled = await Promise.allSettled(
+      categories.map(async category => {
+        assertBuildActive(buildGeneration);
 
-      const params = new URLSearchParams({
-        q: category,
-        format: "jsonv2",
-        countrycodes: "us",
-        bounded: "1",
-        viewbox:
-          `${bounds.west},${bounds.north},${bounds.east},${bounds.south}`,
-        limit: "35",
-        addressdetails: "1",
-        extratags: "1",
-        namedetails: "1"
-      });
+        const params = new URLSearchParams({
+          q: category,
+          format: "jsonv2",
+          countrycodes: "us",
+          bounded: "1",
+          viewbox:
+            `${bounds.west},${bounds.north},${bounds.east},${bounds.south}`,
+          limit: "25",
+          addressdetails: "1",
+          extratags: "1",
+          namedetails: "1"
+        });
 
-      const data = await fetchJson(
-        `${NOMINATIM_FALLBACK_URL}?${params.toString()}`,
-        {},
-        SHORT_ROUTE_NOMINATIM_TIMEOUT_MS
+        const data = await fetchJson(
+          `${NOMINATIM_FALLBACK_URL}?${params.toString()}`,
+          {},
+          SHORT_ROUTE_NOMINATIM_TIMEOUT_MS
+        );
+
+        return (data || [])
+          .map(item =>
+            convertNominatimRestaurant(
+              item,
+              routeContext,
+              category
+            )
+          )
+          .filter(Boolean);
+      })
+    );
+
+    assertBuildActive(buildGeneration);
+
+    const results = settled.flatMap(result =>
+      result.status === "fulfilled"
+        ? result.value
+        : []
+    );
+
+    if (!results.length) {
+      const failure = settled.find(
+        result => result.status === "rejected"
       );
-
-      for (const item of data || []) {
-        const candidate =
-          convertNominatimRestaurant(
-            item,
-            routeContext,
-            category
-          );
-
-        if (candidate) {
-          results.push(candidate);
-        }
-      }
-
-      if (results.length >= 20) {
-        break;
-      }
+      if (failure) throw failure.reason;
     }
 
-    return dedupeCandidates(results);
+    return dedupeCandidates(results)
+      .slice(0, 30);
   }
 
   function convertNominatimRestaurant(

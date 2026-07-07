@@ -1,4 +1,4 @@
-/* DetourEats v1.8.5 Short Route Fallback
+/* DetourEats v1.8.6 Route Verification Fix
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -1762,7 +1762,7 @@ const REMOVED_DEMO_TRIP_KEYS = new Set([
   "new york, ny|washington, dc",
   "syracuse, ny|philadelphia, pa"
 ]);
-const ROUTE_SETUP_TIMEOUT_MS = 48000;
+const ROUTE_SETUP_TIMEOUT_MS = 70000;
 
 function getRouteSignature() {
   const originKey = state.locationIsOrigin && state.currentCoordinates
@@ -1900,11 +1900,11 @@ function getSearchOutcomeCopy(
   const outcomes = {
     restaurant_search_unavailable: {
       label:
-        "Restaurant search unavailable",
+        "Driving route ready",
       detail:
-        "The driving route is valid, but the public restaurant service did not respond. This does not mean there are no restaurants.",
+        "The route was verified, but restaurant discovery did not respond. Recheck to try the restaurant search again.",
       className:
-        "pipeline-unavailable"
+        "pipeline-partial"
     },
     no_restaurants_found: {
       label:
@@ -2310,10 +2310,24 @@ async function previewSelectedRoute({ quiet = false } = {}) {
     state.routePreviewSignature = "";
     state.routePreviewStatus = "error";
     state.routingMessage = "";
-    renderRoutePreview(error?.message || "The route could not be verified.");
+
+    const message =
+      /restaurant|overpass|nominatim/i.test(
+        error?.message || ""
+      )
+        ? "The driving route may be valid, but restaurant discovery did not finish. Please retry the restaurant search."
+        : error?.message ||
+          "We could not calculate that driving route.";
+
+    renderRoutePreview(message);
+
     if (!quiet) {
-      showToast("Route not ready", error?.message || "Check the trip details and try again.");
+      showToast(
+        "Route not ready",
+        message
+      );
     }
+
     throw error;
   } finally {
     setRouteSetupBusy(false);

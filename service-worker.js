@@ -1,4 +1,4 @@
-const CACHE_NAME = "detoureats-v1-8-5-short-route-fallback";
+const CACHE_NAME = "detoureats-v1-8-6-route-verification";
 const ASSETS = [
   "./",
   "./index.html",
