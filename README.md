@@ -1,4 +1,4 @@
-# DetourEats App v0.7
+# DetourEats App v0.8
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -209,3 +209,20 @@ Skip now asks why and changes the next decision:
 - Show me something better raises the minimum Detour Score
 
 The Trip Context panel shows active preferences and the latest adjustment.
+
+
+## v0.8: Driver Mode and decision timing
+
+Added:
+- Simulated route progress bar and remaining-trip estimate
+- Next strong food-zone indicator
+- Decision countdown for the current recommendation
+- Cleaner at-a-glance recommendation card
+- High, medium, and timing-risk confidence indicators
+- Tell Me Why control with scoring and verification details hidden by default
+- Find Something Faster control that immediately applies quick-stop logic
+- Smaller Detour Score treatment so the driving decision leads the screen
+
+Important:
+- Route progress, remaining time, and decision countdown remain prototype estimates.
+- Live GPS, exits, traffic, and route calculations are planned for a later version.

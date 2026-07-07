@@ -650,3 +650,209 @@ button:disabled {
     grid-template-columns: repeat(3, 1fr);
   }
 }
+
+
+/* v0.8 Driver Mode */
+.driver-status-panel {
+  margin-bottom: 14px;
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid rgba(220, 252, 231, 0.22);
+  color: white;
+  backdrop-filter: blur(10px);
+}
+.driver-status-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.driver-status-top strong,
+.driver-status-top span {
+  display: block;
+}
+.driver-kicker {
+  color: #bef264;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.remaining-pill {
+  flex: 0 0 auto;
+  max-width: 48%;
+  padding: 7px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #dcfce7;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+.route-progress-track {
+  height: 8px;
+  margin: 13px 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+.route-progress-bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #bef264, #22c55e);
+  transition: width 180ms ease;
+}
+.driver-status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+.driver-status-grid div {
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.14);
+}
+.driver-status-grid span,
+.driver-status-grid strong {
+  display: block;
+}
+.driver-status-grid span {
+  color: #bbf7d0;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.driver-status-grid strong {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.decision-card {
+  min-height: 0;
+  justify-content: flex-start;
+}
+.decision-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.decision-card-top .badge {
+  margin-bottom: 0;
+}
+.confidence-chip {
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.confidence-high {
+  color: #14532d;
+  background: #dcfce7;
+}
+.confidence-medium {
+  color: #1e40af;
+  background: #dbeafe;
+}
+.confidence-risk {
+  color: #9a3412;
+  background: #ffedd5;
+}
+.driver-decision-label {
+  margin-bottom: 7px;
+  color: var(--accent-dark);
+  font-size: 22px;
+  font-weight: 950;
+  letter-spacing: -0.4px;
+}
+.decision-timing-callout,
+.driver-callout {
+  margin: 4px 0 16px;
+  padding: 15px;
+  border-radius: 17px;
+  background: #052e16;
+  color: white;
+}
+.decision-timing-callout span,
+.decision-timing-callout strong,
+.decision-timing-callout small,
+.driver-callout strong,
+.driver-callout span {
+  display: block;
+}
+.decision-timing-callout span {
+  color: #bef264;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.decision-timing-callout strong {
+  margin-top: 3px;
+  font-size: 21px;
+}
+.decision-timing-callout small,
+.driver-callout span {
+  margin-top: 3px;
+  color: #bbf7d0;
+  line-height: 1.3;
+}
+.driver-empty {
+  padding: 20px 0 4px;
+}
+.driver-fact-grid .fact strong {
+  font-size: 17px;
+}
+.score-footnote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding: 9px 11px;
+  border-top: 1px solid #dcfce7;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.score-footnote strong {
+  color: var(--accent);
+  font-size: 18px;
+}
+.driver-secondary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: -6px 0 16px;
+}
+.driver-action {
+  padding: 13px 10px;
+  border: 1px solid rgba(220, 252, 231, 0.28);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.10);
+  color: #ecfccb;
+  font-size: 13px;
+  font-weight: 850;
+}
+.driver-action:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.details-panel {
+  scroll-margin-top: 12px;
+}
+
+@media (max-width: 390px) {
+  .driver-status-grid,
+  .driver-secondary-actions {
+    grid-template-columns: 1fr;
+  }
+  .remaining-pill {
+    max-width: 52%;
+  }
+}

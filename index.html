@@ -147,11 +147,42 @@
         </div>
       </div>
 
+
+      <section id="driverStatusPanel" class="driver-status-panel" aria-label="Trip progress">
+        <div class="driver-status-top">
+          <div>
+            <span class="driver-kicker">Driver Mode</span>
+            <strong id="routeProgressText">Starting route</strong>
+          </div>
+          <span id="routeRemainingText" class="remaining-pill">Demo estimate</span>
+        </div>
+
+        <div class="route-progress-track" aria-hidden="true">
+          <div id="routeProgressBar" class="route-progress-bar"></div>
+        </div>
+
+        <div class="driver-status-grid">
+          <div>
+            <span>Next food zone</span>
+            <strong id="nextFoodZoneText">Watching the route</strong>
+          </div>
+          <div>
+            <span>Decision timing</span>
+            <strong id="decisionCountdownText">No decision yet</strong>
+          </div>
+        </div>
+      </section>
+
       <div id="decisionCard" class="decision-card"></div>
 
-      <div class="button-row">
+      <div class="button-row driver-primary-actions">
         <button id="takeMeThereButton" class="primary">Take Me There</button>
         <button id="skipButton" class="secondary">Skip</button>
+      </div>
+
+      <div class="driver-secondary-actions">
+        <button id="whyButton" class="driver-action" type="button" aria-expanded="false">Tell Me Why</button>
+        <button id="fasterButton" class="driver-action" type="button">Find Something Faster</button>
       </div>
 
 
@@ -174,7 +205,7 @@
         </div>
       </section>
 
-      <section id="detailsPanel" class="panel details-panel"></section>
+      <section id="detailsPanel" class="panel details-panel hidden"></section>
 
       <button id="demoToggleButton" class="debug-toggle" type="button">Show Demo Controls</button>
 
@@ -185,7 +216,7 @@
 
           <label>
             Route progress
-            <input id="routePositionInput" type="range" min="0" max="24" value="0">
+            <input id="routePositionInput" type="range" min="0" max="13" value="0">
             <span id="routePositionLabel">Start of route</span>
           </label>
 

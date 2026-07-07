@@ -19,10 +19,18 @@ const els = {
   backButton: document.getElementById("backButton"),
   tripTitle: document.getElementById("tripTitle"),
   tripSubtitle: document.getElementById("tripSubtitle"),
+  driverStatusPanel: document.getElementById("driverStatusPanel"),
+  routeProgressBar: document.getElementById("routeProgressBar"),
+  routeProgressText: document.getElementById("routeProgressText"),
+  routeRemainingText: document.getElementById("routeRemainingText"),
+  nextFoodZoneText: document.getElementById("nextFoodZoneText"),
+  decisionCountdownText: document.getElementById("decisionCountdownText"),
   decisionCard: document.getElementById("decisionCard"),
   detailsPanel: document.getElementById("detailsPanel"),
   takeMeThereButton: document.getElementById("takeMeThereButton"),
   skipButton: document.getElementById("skipButton"),
+  whyButton: document.getElementById("whyButton"),
+  fasterButton: document.getElementById("fasterButton"),
   skipReasonPanel: document.getElementById("skipReasonPanel"),
   closeSkipPanelButton: document.getElementById("closeSkipPanelButton"),
   routePositionInput: document.getElementById("routePositionInput"),
@@ -58,6 +66,7 @@ let state = {
   skippedIds: new Set(),
   currentPick: null,
   currentResult: null,
+  detailsOpen: false,
   notificationsEnabled: false
 };
 
@@ -354,6 +363,7 @@ function render() {
   els.tripTitle.textContent = state.destination || "Your trip";
   els.tripSubtitle.textContent = trip.label;
 
+  renderDriverStatus(pick, result, trip);
   renderDecisionCard(pick, trip, copy);
   renderDetailsPanel(pick, trip, copy);
   renderUpcoming(upcoming.length ? upcoming : getFallbackUpcoming(pick));
@@ -363,21 +373,148 @@ function render() {
   }
 
   els.takeMeThereButton.disabled = !pick;
+  els.skipButton.disabled = !pick;
+  els.whyButton.disabled = !pick;
+  els.fasterButton.disabled = !pick;
   els.takeMeThereButton.textContent = pick ? "Take Me There" : "Keep Watching";
+  els.whyButton.textContent = state.detailsOpen ? "Hide Details" : "Tell Me Why";
+  els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
+  els.detailsPanel.classList.toggle("hidden", !state.detailsOpen);
+}
+
+function renderDriverStatus(pick, result, trip) {
+  const candidates = getCandidates();
+  const maxSeq = Math.max(1, ...candidates.map(candidate => Number(candidate.seq ?? 0)));
+  const routePosition = Math.max(0, Math.min(maxSeq, Number(state.routePosition)));
+  const progress = Math.round((routePosition / maxSeq) * 100);
+  const remainingMinutes = Math.max(0, Math.round((maxSeq - routePosition) * 52));
+
+  const evaluated = (result?.evaluated || result?.upcoming || [])
+    .map(normalizePick)
+    .filter(Boolean)
+    .sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0));
+
+  const nextStrong = evaluated.find(candidate =>
+    candidate.open !== false &&
+    candidate.score >= 86 &&
+    Number(candidate.seq ?? 0) >= routePosition
+  );
+
+  els.routeProgressBar.style.width = `${progress}%`;
+  els.routeProgressText.textContent = `${progress}% of demo corridor`;
+  els.routeRemainingText.textContent = remainingMinutes
+    ? `About ${formatDuration(remainingMinutes)} remaining`
+    : "Destination area";
+
+  if (nextStrong) {
+    const minutesAhead = estimateMinutesAhead(nextStrong);
+    els.nextFoodZoneText.textContent =
+      `${nextStrong.city || nextStrong.name} · about ${formatDuration(minutesAhead)} ahead`;
+  } else {
+    els.nextFoodZoneText.textContent = "No strong zone in the current lookahead";
+  }
+
+  if (pick) {
+    const timing = getDecisionTiming(pick);
+    els.decisionCountdownText.textContent = timing.label;
+  } else {
+    els.decisionCountdownText.textContent =
+      trip.key === "keep-driving" ? "No decision needed" : "Watching ahead";
+  }
+}
+
+function estimateMinutesAhead(pick) {
+  const distance = Math.max(
+    0,
+    Number(pick.seq ?? state.routePosition) - Number(state.routePosition)
+  );
+  return distance === 0 ? 3 : Math.max(6, Math.round(distance * 18));
+}
+
+function getDecisionTiming(pick) {
+  const minutes = estimateMinutesAhead(pick);
+
+  if (minutes <= 5) {
+    return {
+      label: "Decide now",
+      detail: "This is the current decision window."
+    };
+  }
+
+  if (minutes <= 12) {
+    return {
+      label: `Decision in about ${minutes} min`,
+      detail: "Be ready to choose directions soon."
+    };
+  }
+
+  return {
+    label: `Decision in about ${minutes} min`,
+    detail: "No action yet. DetourEats is tracking the approach."
+  };
+}
+
+function getConfidenceStatus(pick) {
+  const confidence = String(pick.confidence || "Medium").toLowerCase();
+  const risk = String(pick.operationalRisk || "").toLowerCase();
+
+  if (pick.open === false) {
+    return { label: "Verify hours", className: "confidence-risk" };
+  }
+
+  if (risk.includes("sell out") || risk.includes("limited") || risk.includes("verify")) {
+    return { label: "Timing risk", className: "confidence-risk" };
+  }
+
+  if (confidence === "high") {
+    return { label: "High confidence", className: "confidence-high" };
+  }
+
+  return { label: "Medium confidence", className: "confidence-medium" };
+}
+
+function formatDuration(totalMinutes) {
+  const minutes = Math.max(0, Number(totalMinutes) || 0);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+
+  if (!hours) return `${remainder} min`;
+  if (!remainder) return `${hours} hr`;
+  return `${hours} hr ${remainder} min`;
+}
+
+function toggleWhyDetails() {
+  if (!state.currentPick) return;
+  state.detailsOpen = !state.detailsOpen;
+  els.detailsPanel.classList.toggle("hidden", !state.detailsOpen);
+  els.whyButton.textContent = state.detailsOpen ? "Hide Details" : "Tell Me Why";
+  els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
+
+  if (state.detailsOpen) {
+    setTimeout(() => {
+      els.detailsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }
+}
+
+function findSomethingFaster() {
+  if (!state.currentPick) return;
+  applySkipReason("need-faster");
 }
 
 function renderDecisionCard(pick, trip, copy) {
   if (!pick) {
     els.decisionCard.innerHTML = `
-      <div class="badge ${trip.badgeClass}">${trip.label}</div>
-      <div class="empty">
-        <h2>${trip.headline}</h2>
-        <p>${trip.subline}</p>
-        <div class="fact-grid">
-          <div class="fact highlight">
-            <strong>Looking ahead</strong>
-            <span>We’ll only interrupt when the stop is worth it.</span>
-          </div>
+      <div class="decision-card-top">
+        <div class="badge ${trip.badgeClass}">${trip.label}</div>
+        <div class="confidence-chip confidence-medium">Watching ahead</div>
+      </div>
+      <div class="empty driver-empty">
+        <h2>${escapeHtml(trip.headline)}</h2>
+        <p>${escapeHtml(trip.subline)}</p>
+        <div class="driver-callout">
+          <strong>No action needed.</strong>
+          <span>DetourEats will surface the next worthwhile decision.</span>
         </div>
       </div>
     `;
@@ -385,29 +522,44 @@ function renderDecisionCard(pick, trip, copy) {
   }
 
   const tier = getRecommendationTier(pick);
-  const openLabel = pick.open ? "Open at arrival" : "Check hours";
-  const chainLabel = pick.chain ? "Chain / known brand" : "Independent/local";
+  const openLabel = pick.open ? "Open at arrival" : "Verify hours";
+  const confidence = getConfidenceStatus(pick);
+  const timing = getDecisionTiming(pick);
 
   els.decisionCard.innerHTML = `
-    <div class="badge ${trip.badgeClass}">${tier}</div>
-    <p class="score-label">Detour Score</p>
-    <div class="score">${pick.score}</div>
-    <h2 class="place-name">${escapeHtml(pick.name)}</h2>
-    <p class="meta">${trip.subline}</p>
+    <div class="decision-card-top">
+      <div class="badge ${trip.badgeClass}">${escapeHtml(tier)}</div>
+      <div class="confidence-chip ${confidence.className}">${escapeHtml(confidence.label)}</div>
+    </div>
 
-    <div class="fact-grid">
+    <p class="driver-decision-label">${escapeHtml(trip.headline)}</p>
+    <h2 class="place-name">${escapeHtml(pick.name)}</h2>
+    <p class="meta">${escapeHtml(trip.subline)}</p>
+
+    <div class="decision-timing-callout">
+      <span>Decision window</span>
+      <strong>${escapeHtml(timing.label)}</strong>
+      <small>${escapeHtml(timing.detail)}</small>
+    </div>
+
+    <div class="fact-grid driver-fact-grid">
       <div class="fact highlight">
         <strong>Adds ${pick.added} min</strong>
-        <span>to your trip</span>
+        <span>Estimated trip impact</span>
       </div>
       <div class="fact">
         <strong>${escapeHtml(openLabel)}</strong>
-        <span>ETA ${escapeHtml(String(pick.arrival))}</span>
+        <span>Estimated arrival ${escapeHtml(String(pick.arrival))}</span>
       </div>
       <div class="fact">
-        <strong>${escapeHtml(pick.city || chainLabel)}</strong>
+        <strong>${escapeHtml(pick.city || "Along your route")}</strong>
         <span>${escapeHtml(pick.signature)}</span>
       </div>
+    </div>
+
+    <div class="score-footnote">
+      <span>Detour Score</span>
+      <strong>${pick.score}</strong>
     </div>
   `;
 }
@@ -576,6 +728,7 @@ function startTrip() {
   state.deferUntilSeq = 0;
   state.minimumScore = 0;
   state.lastSkipAdjustment = "";
+  state.detailsOpen = false;
   state.currentTime = Number(els.currentTimeInput.value);
   state.routePosition = Number(els.routePositionInput?.value || 0);
   state.lookahead = Number(els.lookaheadInput?.value || 5);
@@ -592,6 +745,7 @@ function startTrip() {
 
 function goBack() {
   state.started = false;
+  state.detailsOpen = false;
   els.driveScreen.classList.add("hidden");
   els.setupScreen.classList.remove("hidden");
 }
@@ -658,6 +812,7 @@ function applySkipReason(reason) {
       showToast("Skipped", "We’ll look for the next best option.");
   }
 
+  state.detailsOpen = false;
   closeSkipPanel();
   render();
 }
@@ -730,6 +885,8 @@ document.querySelectorAll("[data-skip-reason]").forEach(button => {
   button.addEventListener("click", () => applySkipReason(button.dataset.skipReason));
 });
 els.takeMeThereButton.addEventListener("click", takeMeThere);
+els.whyButton.addEventListener("click", toggleWhyDetails);
+els.fasterButton.addEventListener("click", findSomethingFaster);
 els.enableNotificationsButton.addEventListener("click", enableNotifications);
 els.demoToggleButton.addEventListener("click", toggleDemoControls);
 

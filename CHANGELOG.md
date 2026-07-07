@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.8
+- Added Driver Mode route-progress panel.
+- Added simulated remaining time, next food zone, and decision countdown.
+- Simplified the main recommendation card for at-a-glance use.
+- Added confidence and operational-risk indicators.
+- Hid technical details by default behind Tell Me Why.
+- Added a one-tap Find Something Faster action.
+
+
 ## v0.7
 - Added optional trip preferences.
 - Added preference-fit scoring and explanations.
