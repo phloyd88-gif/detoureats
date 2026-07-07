@@ -1,4 +1,4 @@
-/* DetourEats v1.0 Beta app layer
+/* DetourEats v1.1 Beta app layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -42,6 +42,7 @@ const els = {
   skipButton: document.getElementById("skipButton"),
   whyButton: document.getElementById("whyButton"),
   fasterButton: document.getElementById("fasterButton"),
+  recheckRouteButton: document.getElementById("recheckRouteButton"),
   priorityChips: Array.from(document.querySelectorAll("[data-priority]")),
   skipReasonPanel: document.getElementById("skipReasonPanel"),
   closeSkipPanelButton: document.getElementById("closeSkipPanelButton"),
@@ -406,6 +407,9 @@ function render() {
   els.skipButton.disabled = !pick;
   els.whyButton.disabled = !pick;
   els.fasterButton.disabled = !pick;
+  els.recheckRouteButton.disabled = state.routingBusy || state.routingMode !== "live";
+  els.recheckRouteButton.classList.toggle("hidden", state.routingMode !== "live");
+  els.recheckRouteButton.textContent = state.routingBusy ? "Rechecking…" : "Recheck Route";
   els.takeMeThereButton.textContent = pick ? "Take Me There" : "Keep Watching";
   els.whyButton.textContent = state.detailsOpen ? "Hide Details" : "Tell Me Why";
   els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
@@ -631,6 +635,70 @@ function updatePriorityChips() {
   });
 }
 
+function getScoreMeaning(score) {
+  const value = Number(score || 0);
+  if (value >= 97) return "Rare, route-defining stop";
+  if (value >= 92) return "Worth changing the plan";
+  if (value >= 84) return "Strong decision for this stretch";
+  return "Best practical option available";
+}
+
+function getScoreComparison(pick, result) {
+  const next = normalizePick(result?.nextAlternative);
+  if (!next) {
+    return {
+      text: "No qualifying alternative in the current route window",
+      className: "comparison-current"
+    };
+  }
+
+  const difference = Number(pick.score) - Number(next.score);
+
+  if (difference >= 6) {
+    return {
+      text: `${difference} points stronger than the next qualifying stop`,
+      className: "comparison-current"
+    };
+  }
+
+  if (difference <= -6) {
+    return {
+      text: `${Math.abs(difference)} points below a stronger option later`,
+      className: "comparison-later"
+    };
+  }
+
+  return {
+    text: `Similar score to the next qualifying stop`,
+    className: "comparison-even"
+  };
+}
+
+function renderTrustSnapshot(pick) {
+  const routeMode = pick.liveRoute ? "Live route" : "Curated route";
+  const confidence = pick.confidence || "Medium";
+  const hours = pick.open ? "Open at arrival" : "Hours need verification";
+  const freshness = pick.verifiedDate || "Prototype dataset";
+  const risk = pick.operationalRisk
+    ? `<div class="trust-alert">${escapeHtml(pick.operationalRisk)}</div>`
+    : "";
+
+  return `
+    <div class="trust-snapshot">
+      <div class="trust-snapshot-heading">
+        <span>Trust snapshot</span>
+        <strong>${escapeHtml(routeMode)}</strong>
+      </div>
+      <div class="trust-snapshot-grid">
+        <div><span>Restaurant data</span><strong>${escapeHtml(confidence)} confidence</strong></div>
+        <div><span>Hours</span><strong>${escapeHtml(hours)}</strong></div>
+        <div><span>Last checked</span><strong>${escapeHtml(freshness)}</strong></div>
+      </div>
+      ${risk}
+    </div>
+  `;
+}
+
 function renderDecisionCard(pick, trip, copy) {
   if (!pick) {
     els.decisionCard.innerHTML = `
@@ -639,6 +707,11 @@ function renderDecisionCard(pick, trip, copy) {
         <div class="confidence-chip confidence-medium">Watching ahead</div>
       </div>
       <div class="empty driver-empty">
+        <div class="score-hero score-hero-empty">
+          <span>Detour Score</span>
+          <strong>—</strong>
+          <small>Waiting for a qualifying stop</small>
+        </div>
         <h2>${escapeHtml(trip.headline)}</h2>
         <p>${escapeHtml(trip.subline)}</p>
         <div class="driver-callout">
@@ -654,6 +727,12 @@ function renderDecisionCard(pick, trip, copy) {
   const openLabel = pick.open ? "Open at arrival" : "Verify hours";
   const confidence = getConfidenceStatus(pick);
   const timing = getDecisionTiming(pick);
+  const comparison = getScoreComparison(pick, state.currentResult);
+  const explanation = pick.scoreExplanation || {};
+  const scoreClass =
+    pick.score >= 92 ? "score-elite" :
+    pick.score >= 84 ? "score-strong" :
+    "score-practical";
 
   els.decisionCard.innerHTML = `
     <div class="decision-card-top">
@@ -661,9 +740,37 @@ function renderDecisionCard(pick, trip, copy) {
       <div class="confidence-chip ${confidence.className}">${escapeHtml(confidence.label)}</div>
     </div>
 
-    <p class="driver-decision-label">${escapeHtml(trip.headline)}</p>
-    <h2 class="place-name">${escapeHtml(pick.name)}</h2>
-    <p class="meta">${escapeHtml(trip.subline)}</p>
+    <div class="score-and-decision">
+      <div class="score-hero ${scoreClass}" aria-label="Detour Score ${pick.score}">
+        <span>Detour Score</span>
+        <strong>${pick.score}</strong>
+        <small>${escapeHtml(getScoreMeaning(pick.score))}</small>
+      </div>
+
+      <div class="decision-copy">
+        <p class="driver-decision-label">${escapeHtml(trip.headline)}</p>
+        <h2 class="place-name">${escapeHtml(pick.name)}</h2>
+        <p class="meta">${escapeHtml(trip.subline)}</p>
+        <div class="score-comparison ${comparison.className}">
+          ${escapeHtml(comparison.text)}
+        </div>
+      </div>
+    </div>
+
+    <div class="score-driver-row">
+      <div>
+        <span>Food</span>
+        <strong>${escapeHtml(String(explanation.restaurantQuality ?? "—"))}</strong>
+      </div>
+      <div>
+        <span>Trip fit</span>
+        <strong>${escapeHtml(String(explanation.tripFit ?? "—"))}</strong>
+      </div>
+      <div>
+        <span>Time fit</span>
+        <strong>${escapeHtml(String(explanation.timeFit ?? "—"))}</strong>
+      </div>
+    </div>
 
     <div class="decision-timing-callout">
       <span>Decision window</span>
@@ -674,11 +781,11 @@ function renderDecisionCard(pick, trip, copy) {
     <div class="fact-grid driver-fact-grid">
       <div class="fact highlight">
         <strong>Adds ${pick.added} min</strong>
-        <span>Estimated trip impact</span>
+        <span>${pick.liveRoute ? "Live route impact" : "Estimated trip impact"}</span>
       </div>
       <div class="fact">
         <strong>${escapeHtml(openLabel)}</strong>
-        <span>Estimated arrival ${escapeHtml(String(pick.arrival))}</span>
+        <span>${pick.liveRoute ? "Live ETA" : "Estimated arrival"} ${escapeHtml(String(pick.arrival))}</span>
       </div>
       <div class="fact">
         <strong>${escapeHtml(pick.city || "Along your route")}</strong>
@@ -686,10 +793,7 @@ function renderDecisionCard(pick, trip, copy) {
       </div>
     </div>
 
-    <div class="score-footnote">
-      <span>Detour Score</span>
-      <strong>${pick.score}</strong>
-    </div>
+    ${renderTrustSnapshot(pick)}
   `;
 }
 
@@ -802,7 +906,7 @@ function renderTripTimeline(pick, result) {
         <div class="timeline-stop-body">
           <div class="timeline-stop-top">
             <span>${escapeHtml(role)}</span>
-            <strong>${candidate.score}</strong>
+            <div class="timeline-score"><small>Score</small><strong>${candidate.score}</strong></div>
           </div>
           <h3>${escapeHtml(candidate.name)}</h3>
           <p>${escapeHtml(candidate.city || candidate.category || "")}</p>
@@ -1450,6 +1554,20 @@ async function refreshLiveRoute(coordinates) {
   }
 }
 
+async function recheckRouteNow() {
+  if (
+    state.routingMode !== "live" ||
+    !state.liveSession ||
+    !state.currentCoordinates ||
+    state.routingBusy
+  ) {
+    return;
+  }
+
+  showToast("Rechecking route", "Updating timing and restaurant order from your current position.");
+  await refreshLiveRoute(state.currentCoordinates);
+}
+
 async function enableNotifications() {
   if (!("Notification" in window)) {
     showToast("Notifications unavailable", "This browser does not support notifications.");
@@ -1513,6 +1631,7 @@ document.querySelectorAll("[data-skip-reason]").forEach(button => {
 els.takeMeThereButton.addEventListener("click", takeMeThere);
 els.whyButton.addEventListener("click", toggleWhyDetails);
 els.fasterButton.addEventListener("click", eatSooner);
+els.recheckRouteButton.addEventListener("click", recheckRouteNow);
 (els.priorityChips || []).forEach(button => {
   button.addEventListener("click", () => setEatingPriority(button.dataset.priority));
 });

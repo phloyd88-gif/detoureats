@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1 Beta
+- Made Detour Score a prominent main-card visual.
+- Added plain-English score meaning and comparison with the next option.
+- Added visible Food, Trip Fit, and Time Fit components.
+- Added a Trust Snapshot with route mode, restaurant confidence, hours status, verification date, and operational risk.
+- Made timeline scores more prominent.
+- Added a manual Recheck Route action for live-location trips.
+
+
 ## v1.0 Beta
 - Combined Trip Timeline, Food Zones, Live Location Beta, and live route calculations.
 - Added Use My Location with browser permission handling.

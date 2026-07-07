@@ -1,4 +1,4 @@
-# DetourEats App v1.0 Beta
+# DetourEats App v1.1 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -302,3 +302,24 @@ app automatically returns to the curated route if either service is unavailable.
 These public endpoints are appropriate for prototype testing, not a production
 navigation service-level agreement. A production release should eventually use
 a dedicated hosted geocoder/routing provider or a self-hosted service.
+
+
+## v1.1 Beta: Score and Trust
+
+This version makes Detour Score one of the primary driver-facing elements.
+
+Added:
+- Large Detour Score display on the main recommendation card
+- Plain-English score meaning
+- Direct comparison with the next qualifying stop
+- Food, Trip Fit, and Time Fit shown without opening details
+- Trust Snapshot showing:
+  - live or curated route mode
+  - restaurant-data confidence
+  - open-at-arrival status
+  - last verification date
+  - operational warnings
+- More prominent Detour Scores in the trip timeline
+- Recheck Route button during live-location trips
+
+The full six-factor score breakdown remains available under Tell Me Why.

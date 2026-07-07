@@ -1258,3 +1258,225 @@ button:disabled {
     flex-direction: column;
   }
 }
+
+
+/* v1.1 Beta: Detour Score prominence and trust */
+.score-and-decision {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 15px;
+}
+.score-hero {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 10px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #14532d;
+  box-shadow:
+    inset 0 0 0 1px rgba(20, 83, 45, 0.08),
+    0 12px 28px rgba(20, 83, 45, 0.13);
+  text-align: center;
+}
+.score-hero > span {
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.score-hero > strong {
+  margin: 1px 0;
+  font-size: 52px;
+  line-height: 0.98;
+  letter-spacing: -3px;
+}
+.score-hero > small {
+  max-width: 96px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.score-hero.score-elite {
+  border-color: #facc15;
+  background: #fefce8;
+  color: #854d0e;
+}
+.score-hero.score-strong {
+  border-color: #4ade80;
+}
+.score-hero.score-practical {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+.score-hero-empty {
+  margin: 0 auto 16px;
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #64748b;
+}
+.decision-copy {
+  min-width: 0;
+}
+.decision-copy .driver-decision-label {
+  margin-top: 0;
+}
+.score-comparison {
+  display: inline-flex;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+.comparison-current {
+  color: #14532d;
+  background: #dcfce7;
+}
+.comparison-later {
+  color: #92400e;
+  background: #fef3c7;
+}
+.comparison-even {
+  color: #1e3a8a;
+  background: #dbeafe;
+}
+.score-driver-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0 0 15px;
+}
+.score-driver-row > div {
+  padding: 10px;
+  border: 1px solid #dcfce7;
+  border-radius: 13px;
+  background: #f8fafc;
+  text-align: center;
+}
+.score-driver-row span,
+.score-driver-row strong {
+  display: block;
+}
+.score-driver-row span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.score-driver-row strong {
+  margin-top: 3px;
+  color: #14532d;
+  font-size: 18px;
+}
+
+.trust-snapshot {
+  margin-top: 13px;
+  padding: 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+.trust-snapshot-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.trust-snapshot-heading span {
+  color: #166534;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.trust-snapshot-heading strong {
+  font-size: 11px;
+}
+.trust-snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+.trust-snapshot-grid div {
+  padding: 8px;
+  border-radius: 10px;
+  background: white;
+  border: 1px solid #e2e8f0;
+}
+.trust-snapshot-grid span,
+.trust-snapshot-grid strong {
+  display: block;
+}
+.trust-snapshot-grid span {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.trust-snapshot-grid strong {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.25;
+}
+.trust-alert {
+  margin-top: 8px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+.timeline-score {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #dcfce7;
+  color: #14532d;
+}
+.timeline-score small {
+  margin: 0;
+  color: inherit;
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.timeline-score strong {
+  font-size: 15px;
+  line-height: 1;
+}
+.driver-secondary-actions {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 560px) {
+  .score-and-decision {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+  .score-hero {
+    margin: 0 auto;
+  }
+  .decision-copy {
+    text-align: left;
+  }
+  .score-driver-row,
+  .trust-snapshot-grid,
+  .driver-secondary-actions {
+    grid-template-columns: 1fr;
+  }
+}
