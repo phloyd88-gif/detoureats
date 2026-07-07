@@ -1,4 +1,4 @@
-# DetourEats App v1.2 Beta
+# DetourEats App v1.3 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -359,3 +359,40 @@ they have been independently evaluated against arrival time.
 
 If route discovery is unavailable, live routing continues with relevant curated
 stops. If live routing also fails, the full curated demo remains available.
+
+
+## v1.3 Beta: Choose Any Trip
+
+The app is no longer functionally tied to Amsterdam, New York, or Myrtle Beach.
+
+### New trip setup
+
+- Enter any U.S. starting city, address, or landmark
+- Enter any U.S. destination
+- Use current device location as the starting point
+- Swap typed origin and destination
+- Select example routes for quick testing
+- Reuse up to five recent trips
+- Clear recent-trip history from the setup screen
+
+### Route preview
+
+Before Driver Mode starts, DetourEats now verifies the selected trip and shows:
+
+- Resolved origin and destination
+- Approximate drive time
+- Approximate driving distance
+- Number of route-relevant food options
+- Route-discovered versus curated option count
+
+Selecting **Trust Us** automatically performs the preview when needed, so the
+preview button is optional.
+
+### Accuracy and fallback behavior
+
+A typed route uses the same live beta geocoding, routing, corridor discovery,
+detour calculations, and score guardrails as a current-location route.
+
+For arbitrary routes, DetourEats no longer silently substitutes the old
+Amsterdam-to-Myrtle Beach curated corridor. If a route cannot be verified, the
+app stays on setup and explains that the locations should be checked.

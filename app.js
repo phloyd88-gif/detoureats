@@ -1,11 +1,18 @@
-/* DetourEats v1.2 Beta app layer
+/* DetourEats v1.3 Beta app layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
 const els = {
   setupScreen: document.getElementById("setupScreen"),
   driveScreen: document.getElementById("driveScreen"),
+  originInput: document.getElementById("originInput"),
   destinationInput: document.getElementById("destinationInput"),
+  swapRouteButton: document.getElementById("swapRouteButton"),
+  previewRouteButton: document.getElementById("previewRouteButton"),
+  routePreviewCard: document.getElementById("routePreviewCard"),
+  recentTripsSection: document.getElementById("recentTripsSection"),
+  recentTripsList: document.getElementById("recentTripsList"),
+  clearRecentTripsButton: document.getElementById("clearRecentTripsButton"),
   useLocationButton: document.getElementById("useLocationButton"),
   locationModeBadge: document.getElementById("locationModeBadge"),
   locationSetupTitle: document.getElementById("locationSetupTitle"),
@@ -59,8 +66,13 @@ const els = {
 
 let state = {
   started: false,
-  destination: "Myrtle Beach, SC",
+  origin: "",
+  destination: "",
   locationEnabled: false,
+  locationIsOrigin: false,
+  routePreview: null,
+  routePreviewSignature: "",
+  routePreviewStatus: "idle",
   currentCoordinates: null,
   locationAccuracy: null,
   routingMode: "demo",
@@ -392,8 +404,14 @@ function render() {
   const trip = getTripState(pick, result);
   const copy = getRecommendationCopy(pick, trip);
 
-  els.tripTitle.textContent = state.destination || "Your trip";
-  els.tripSubtitle.textContent = trip.label;
+  els.tripTitle.textContent =
+    state.origin && state.destination
+      ? `${state.origin} → ${state.destination}`
+      : state.destination || "Your trip";
+  els.tripSubtitle.textContent =
+    state.routingMode === "live"
+      ? `${trip.label} · live route`
+      : trip.label;
 
   renderDriverStatus(pick, result, trip);
   renderDecisionCard(pick, trip, copy);
@@ -1216,6 +1234,271 @@ function getPreferenceSummary() {
 }
 
 const PREFERENCE_STORAGE_KEY = "detoureats_preferences_v1";
+const RECENT_TRIPS_STORAGE_KEY = "detoureats_recent_trips_v1";
+const MAX_RECENT_TRIPS = 5;
+
+function getRouteSignature() {
+  const originKey = state.locationIsOrigin && state.currentCoordinates
+    ? `gps:${state.currentCoordinates.map(value => Number(value).toFixed(4)).join(",")}`
+    : `text:${String(els.originInput?.value || "").trim().toLowerCase()}`;
+  const destinationKey = String(els.destinationInput?.value || "").trim().toLowerCase();
+  return `${originKey}|${destinationKey}|${Number(els.maxAddedInput?.value || 10)}`;
+}
+
+function invalidateRoutePreview() {
+  state.routePreview = null;
+  state.routePreviewSignature = "";
+  state.routePreviewStatus = "idle";
+  renderRoutePreview();
+}
+
+function getRecentTrips() {
+  try {
+    const trips = JSON.parse(localStorage.getItem(RECENT_TRIPS_STORAGE_KEY) || "[]");
+    return Array.isArray(trips) ? trips.slice(0, MAX_RECENT_TRIPS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentTrip(origin, destination) {
+  if (!origin || !destination) return;
+
+  const current = getRecentTrips();
+  const normalized = `${origin.toLowerCase()}|${destination.toLowerCase()}`;
+  const next = [
+    { origin, destination, savedAt: Date.now() },
+    ...current.filter(
+      trip => `${String(trip.origin).toLowerCase()}|${String(trip.destination).toLowerCase()}` !== normalized
+    )
+  ].slice(0, MAX_RECENT_TRIPS);
+
+  try {
+    localStorage.setItem(RECENT_TRIPS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Recent trips are optional.
+  }
+
+  renderRecentTrips();
+}
+
+function renderRecentTrips() {
+  if (!els.recentTripsList || !els.recentTripsSection) return;
+
+  const trips = getRecentTrips();
+  els.recentTripsSection.classList.toggle("hidden", trips.length === 0);
+
+  els.recentTripsList.innerHTML = trips.map((trip, index) => `
+    <button type="button" class="recent-trip-button" data-recent-trip="${index}">
+      <strong>${escapeHtml(trip.origin)}</strong>
+      <span>→ ${escapeHtml(trip.destination)}</span>
+    </button>
+  `).join("");
+
+  els.recentTripsList.querySelectorAll("[data-recent-trip]").forEach(button => {
+    button.addEventListener("click", () => {
+      const trip = trips[Number(button.dataset.recentTrip)];
+      if (!trip) return;
+      state.locationEnabled = false;
+      state.locationIsOrigin = false;
+      state.currentCoordinates = null;
+      els.originInput.value = trip.origin;
+      els.destinationInput.value = trip.destination;
+      els.useLocationButton.textContent = "Use My Location";
+      updateLocationSetup("Typed route selected", "Preview the route before starting.", "demo");
+      invalidateRoutePreview();
+    });
+  });
+}
+
+function clearRecentTrips() {
+  try {
+    localStorage.removeItem(RECENT_TRIPS_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+  renderRecentTrips();
+}
+
+function renderRoutePreview(message = "") {
+  if (!els.routePreviewCard) return;
+
+  if (state.routePreviewStatus === "loading") {
+    els.routePreviewCard.innerHTML = `
+      <div class="route-preview-loading">
+        <span class="route-preview-spinner" aria-hidden="true"></span>
+        <div>
+          <span>Checking route</span>
+          <strong>${escapeHtml(message || state.routingMessage || "Calculating drive time and food options")}</strong>
+          <small>This may take several seconds on a long route.</small>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  if (state.routePreviewStatus === "error") {
+    els.routePreviewCard.innerHTML = `
+      <div class="route-preview-error">
+        <span>Route not ready</span>
+        <strong>${escapeHtml(message || "We could not verify that route.")}</strong>
+        <small>Check both locations and try again.</small>
+      </div>
+    `;
+    return;
+  }
+
+  const preview = state.routePreview;
+  if (!preview) {
+    els.routePreviewCard.innerHTML = `
+      <div class="route-preview-empty">
+        <span>Route preview</span>
+        <strong>Enter a starting point and destination</strong>
+        <small>We will verify the route and search for food before the trip starts.</small>
+      </div>
+    `;
+    return;
+  }
+
+  const metrics = preview.snapshot?.metrics || {};
+  const discovered = Number(metrics.discoveredCount || 0);
+  const curated = Number(metrics.curatedCount || 0);
+  const total = Number(metrics.totalCandidates || discovered + curated);
+
+  els.routePreviewCard.innerHTML = `
+    <div class="route-preview-ready">
+      <div class="route-preview-heading">
+        <span>Route ready</span>
+        <strong>${escapeHtml(state.origin)} → ${escapeHtml(state.destination)}</strong>
+      </div>
+      <div class="route-preview-grid">
+        <div><span>Drive time</span><strong>${escapeHtml(formatDuration(metrics.totalMinutes || metrics.remainingMinutes || 0))}</strong></div>
+        <div><span>Distance</span><strong>${escapeHtml(String(Math.round(Number(metrics.totalMiles || metrics.remainingMiles || 0))))} mi</strong></div>
+        <div><span>Food options</span><strong>${total}</strong></div>
+      </div>
+      <p>${discovered} route-discovered · ${curated} curated</p>
+    </div>
+  `;
+}
+
+function setRouteSetupBusy(isBusy, message = "") {
+  state.routingBusy = Boolean(isBusy);
+  state.routePreviewStatus = isBusy ? "loading" : state.routePreviewStatus;
+  els.previewRouteButton.disabled = isBusy;
+  els.startTripButton.disabled = isBusy;
+  els.swapRouteButton.disabled = isBusy;
+  els.useLocationButton.disabled = isBusy;
+  els.previewRouteButton.textContent = isBusy ? "Checking…" : "Preview Route";
+  els.startTripButton.textContent = isBusy ? "Preparing Trip…" : "Trust Us";
+  renderRoutePreview(message);
+}
+
+function validateRouteInputs() {
+  const originText = String(els.originInput?.value || "").trim();
+  const destinationText = String(els.destinationInput?.value || "").trim();
+
+  if (!state.locationIsOrigin && !originText) {
+    throw new Error("Enter a starting point or select Use My Location.");
+  }
+  if (!destinationText) {
+    throw new Error("Enter a destination.");
+  }
+  if (
+    !state.locationIsOrigin &&
+    originText.toLowerCase() === destinationText.toLowerCase()
+  ) {
+    throw new Error("Starting point and destination must be different.");
+  }
+
+  return { originText, destinationText };
+}
+
+async function previewSelectedRoute({ quiet = false } = {}) {
+  const service = window.DetourEatsLiveRoute;
+  if (!service?.buildLiveTrip) {
+    throw new Error("The live route service is unavailable.");
+  }
+
+  const { originText, destinationText } = validateRouteInputs();
+  const signature = getRouteSignature();
+
+  if (state.routePreview && state.routePreviewSignature === signature) {
+    return state.routePreview;
+  }
+
+  state.origin = state.locationIsOrigin ? "Current location" : originText;
+  state.destination = destinationText;
+  state.routePreviewStatus = "loading";
+  setRouteSetupBusy(true, "Locating your route");
+
+  try {
+    const result = await service.buildLiveTrip({
+      originCoordinates:
+        state.locationIsOrigin && Array.isArray(state.currentCoordinates)
+          ? state.currentCoordinates
+          : null,
+      originText: state.locationIsOrigin ? "" : originText,
+      destinationText,
+      candidates: window.DETOUR_EATS_CANDIDATES || [],
+      maxAddedMinutes: Number(els.maxAddedInput.value),
+      progressCallback: message => {
+        state.routingMessage = message;
+        renderRoutePreview(message);
+      }
+    });
+
+    state.routePreview = result;
+    state.routePreviewSignature = signature;
+    state.routePreviewStatus = "ready";
+    state.routingMessage = "";
+    renderRoutePreview();
+
+    if (!quiet) {
+      const count = Number(result.snapshot?.metrics?.totalCandidates || 0);
+      showToast("Route ready", `${count} qualifying food options were found.`);
+    }
+
+    return result;
+  } catch (error) {
+    state.routePreview = null;
+    state.routePreviewSignature = "";
+    state.routePreviewStatus = "error";
+    state.routingMessage = "";
+    renderRoutePreview(error?.message || "The route could not be verified.");
+    if (!quiet) {
+      showToast("Route not ready", error?.message || "Check the trip details and try again.");
+    }
+    throw error;
+  } finally {
+    setRouteSetupBusy(false);
+  }
+}
+
+function swapRoute() {
+  if (state.locationIsOrigin) {
+    showToast(
+      "Type a starting point first",
+      "Current location cannot be used as the destination when swapping."
+    );
+    return;
+  }
+
+  const origin = els.originInput.value;
+  els.originInput.value = els.destinationInput.value;
+  els.destinationInput.value = origin;
+  invalidateRoutePreview();
+}
+
+function applyExampleRoute(origin, destination) {
+  state.locationEnabled = false;
+  state.locationIsOrigin = false;
+  state.currentCoordinates = null;
+  els.originInput.value = origin;
+  els.destinationInput.value = destination;
+  els.useLocationButton.textContent = "Use My Location";
+  updateLocationSetup("Example route selected", "Preview the route or start the trip.", "demo");
+  invalidateRoutePreview();
+}
 
 function savePreferences() {
   const preferences = {
@@ -1279,8 +1562,14 @@ function showToast(title, message) {
 async function startTrip() {
   if (state.routingBusy) return;
 
+  let preview;
+  try {
+    preview = await previewSelectedRoute({ quiet: true });
+  } catch {
+    return;
+  }
+
   state.started = true;
-  state.destination = els.destinationInput.value || "your destination";
   state.maxAdded = Number(els.maxAddedInput.value);
   state.tripMode = els.tripModeInput.value;
   state.stopType = els.stopTypeInput?.value || "either";
@@ -1293,73 +1582,42 @@ async function startTrip() {
   state.minimumScore = 0;
   state.lastSkipAdjustment = "";
   state.detailsOpen = false;
-  state.currentTime = state.locationEnabled
-    ? getActualCurrentMinutes()
-    : Number(els.currentTimeInput.value);
-  state.routePosition = Number(els.routePositionInput?.value || 0);
-  state.lookahead = Number(els.lookaheadInput?.value || 5);
+  state.currentTime = getActualCurrentMinutes();
+  state.routePosition = 0;
+  state.lookahead = 99;
   state.candidatePool = els.candidatePoolInput?.value || "All";
   state.hoursMode = els.hoursModeInput?.value || "requireOpen";
   state.skippedIds = new Set();
-  state.routingMode = "demo";
-  state.liveCandidates = null;
-  state.liveSession = null;
-  state.liveMetrics = null;
   savePreferences();
+
+  state.liveSession = preview.session;
+  applyLiveSnapshot(preview.snapshot);
 
   els.setupScreen.classList.add("hidden");
   els.driveScreen.classList.remove("hidden");
 
+  if (state.locationIsOrigin) {
+    startLocationWatch();
+  }
+
+  saveRecentTrip(state.origin, state.destination);
   render();
 
-  if (state.locationEnabled && state.currentCoordinates) {
-    await activateLiveRoute();
-  } else {
-    showToast(
-      "Trust Us Mode is on",
-      "Using the curated route. Use My Location next time for live beta timing."
-    );
-  }
+  const count = Number(preview.snapshot?.metrics?.totalCandidates || 0);
+  showToast(
+    "Trip started",
+    count > 0
+      ? `${count} route-relevant food options are being evaluated.`
+      : "The route is active; DetourEats will keep watching for viable stops."
+  );
 }
 
 async function activateLiveRoute() {
-  const service = window.DetourEatsLiveRoute;
-  if (!service || !state.currentCoordinates) return;
-
-  setRoutingBusy(true, "Preparing live route");
-
-  try {
-    const result = await service.buildLiveTrip({
-      originCoordinates: state.currentCoordinates,
-      destinationText: state.destination,
-      candidates: window.DETOUR_EATS_CANDIDATES || [],
-      maxAddedMinutes: state.maxAdded,
-      progressCallback: updateRoutingMessage
-    });
-
-    state.liveSession = result.session;
-    applyLiveSnapshot(result.snapshot);
-    startLocationWatch();
-
-    const discovered = Number(result.snapshot?.metrics?.discoveredCount || 0);
-    showToast(
-      "Live route ready",
-      discovered > 0
-        ? `${discovered} additional restaurant options were discovered along this route.`
-        : "Recommendations now update from your real position."
-    );
-  } catch (error) {
-    console.error(error);
-    state.routingMode = "demo";
-    state.routingMessage = "";
-    showToast(
-      "Using curated route",
-      "The live beta could not calculate this trip, so DetourEats kept working in demo mode."
-    );
-  } finally {
-    setRoutingBusy(false);
-    render();
-  }
+  const result = await previewSelectedRoute({ quiet: true });
+  state.liveSession = result.session;
+  applyLiveSnapshot(result.snapshot);
+  if (state.locationIsOrigin) startLocationWatch();
+  render();
 }
 
 function applyLiveSnapshot(snapshot) {
@@ -1517,16 +1775,24 @@ async function requestCurrentLocation() {
     ];
     state.locationAccuracy = Number(position.coords.accuracy || 0);
     state.locationEnabled = true;
+    state.locationIsOrigin = true;
+    els.originInput.value = "Current location";
+    invalidateRoutePreview();
 
     els.useLocationButton.textContent = "Location Ready";
     updateLocationSetup(
-      "Real location ready",
-      `Accuracy is approximately ${Math.round(state.locationAccuracy)} meters.`,
+      "Current location selected",
+      `Starting-point accuracy is approximately ${Math.round(state.locationAccuracy)} meters.`,
       "live"
     );
   } catch (error) {
     state.locationEnabled = false;
+    state.locationIsOrigin = false;
     state.currentCoordinates = null;
+    if (els.originInput.value === "Current location") {
+      els.originInput.value = "";
+    }
+    invalidateRoutePreview();
     els.useLocationButton.textContent = "Use My Location";
 
     const message = error?.code === 1
@@ -1550,7 +1816,7 @@ function updateLocationSetup(title, status, mode = "demo") {
 
 function startLocationWatch() {
   stopLocationWatch();
-  if (!state.locationEnabled || !navigator.geolocation) return;
+  if (!state.locationIsOrigin || !navigator.geolocation) return;
 
   state.locationWatchId = navigator.geolocation.watchPosition(
     handleLocationUpdate,
@@ -1689,7 +1955,29 @@ function registerServiceWorker() {
 }
 
 els.startTripButton.addEventListener("click", startTrip);
+els.previewRouteButton.addEventListener("click", () => {
+  previewSelectedRoute().catch(() => {});
+});
 els.useLocationButton.addEventListener("click", requestCurrentLocation);
+els.swapRouteButton.addEventListener("click", swapRoute);
+els.clearRecentTripsButton.addEventListener("click", clearRecentTrips);
+document.querySelectorAll("[data-origin][data-destination]").forEach(button => {
+  button.addEventListener("click", () => {
+    applyExampleRoute(button.dataset.origin, button.dataset.destination);
+  });
+});
+
+els.originInput.addEventListener("input", () => {
+  if (els.originInput.value !== "Current location") {
+    state.locationEnabled = false;
+    state.locationIsOrigin = false;
+    state.currentCoordinates = null;
+    els.useLocationButton.textContent = "Use My Location";
+    updateLocationSetup("Typed starting point", "Preview the route before starting.", "demo");
+  }
+  invalidateRoutePreview();
+});
+els.destinationInput.addEventListener("input", invalidateRoutePreview);
 els.backButton.addEventListener("click", goBack);
 els.skipButton.addEventListener("click", skipPick);
 els.closeSkipPanelButton?.addEventListener("click", closeSkipPanel);
@@ -1726,10 +2014,15 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
   });
   el.addEventListener("change", () => {
     savePreferences();
+    if (el === els.maxAddedInput && !state.started) {
+      invalidateRoutePreview();
+    }
     if (state.started) updateFromControls();
   });
 });
 
 window.addEventListener("beforeunload", stopLocationWatch);
 loadPreferences();
+renderRecentTrips();
+renderRoutePreview();
 registerServiceWorker();

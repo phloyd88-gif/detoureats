@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3 Beta
+- Added editable starting point and destination fields for arbitrary U.S. trips.
+- Added current location as an optional origin rather than a route requirement.
+- Added origin/destination swap for typed routes.
+- Added route validation and a pre-trip summary with distance, drive time, and food-option counts.
+- Added recent-trip history and quick example routes.
+- Added cached preview reuse so Trust Us does not repeat a completed route search.
+- Removed Amsterdam and Myrtle Beach as functional input defaults.
+- Prevented arbitrary-route failures from silently substituting the original curated corridor.
+- Optimized curated-stop processing so unrelated corridor restaurants are filtered before address lookup.
+
+
 ## v1.2 Beta
 - Added restaurant discovery across any live route using OpenStreetMap and Overpass.
 - Added route-corridor sampling and geographically distributed discovery candidates.

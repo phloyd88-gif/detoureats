@@ -24,24 +24,57 @@
       <div class="hero-card">
         <div class="eyebrow">Trust Us Mode</div>
         <h2>Road-trip food decisions, handled.</h2>
-        <p class="hero-copy">Tell us where you’re headed. DetourEats watches the route and recommends the best stop when it’s actually worth it.</p>
+        <p class="hero-copy">Choose any starting point and destination. DetourEats checks the route and recommends the stop that is actually worth it.</p>
       </div>
 
       <div class="panel setup-panel">
 
         <section class="location-setup-card">
           <div>
-            <span id="locationModeBadge" class="location-mode-badge demo">Demo route</span>
-            <strong id="locationSetupTitle">Use your real location</strong>
-            <small id="locationSetupStatus">Optional. The existing demo still works without it.</small>
+            <span id="locationModeBadge" class="location-mode-badge demo">Choose a route</span>
+            <strong id="locationSetupTitle">Start anywhere</strong>
+            <small id="locationSetupStatus">Type a starting point or use your current location.</small>
           </div>
           <button id="useLocationButton" class="inline-location-button" type="button">Use My Location</button>
         </section>
 
-        <label>
-          Where are you headed?
-          <input id="destinationInput" type="text" value="Myrtle Beach, SC" placeholder="Destination">
-        </label>
+        <section class="route-entry-card" aria-label="Trip route">
+          <label>
+            Starting point
+            <input id="originInput" type="text" value="" placeholder="City, address, or landmark" autocomplete="street-address">
+          </label>
+
+          <button id="swapRouteButton" class="swap-route-button" type="button" aria-label="Swap starting point and destination">
+            ⇅ Swap
+          </button>
+
+          <label>
+            Destination
+            <input id="destinationInput" type="text" value="" placeholder="City, address, or landmark" autocomplete="street-address">
+          </label>
+        </section>
+
+        <div class="route-example-row" aria-label="Example trips">
+          <button type="button" class="route-example" data-origin="Albany, NY" data-destination="Boston, MA">Albany → Boston</button>
+          <button type="button" class="route-example" data-origin="New York, NY" data-destination="Washington, DC">NYC → D.C.</button>
+          <button type="button" class="route-example" data-origin="Syracuse, NY" data-destination="Philadelphia, PA">Syracuse → Philly</button>
+        </div>
+
+        <section id="recentTripsSection" class="recent-trips-section hidden">
+          <div class="recent-trips-heading">
+            <strong>Recent trips</strong>
+            <button id="clearRecentTripsButton" class="text-button" type="button">Clear</button>
+          </div>
+          <div id="recentTripsList" class="recent-trips-list"></div>
+        </section>
+
+        <section id="routePreviewCard" class="route-preview-card" aria-live="polite">
+          <div class="route-preview-empty">
+            <span>Route preview</span>
+            <strong>Enter a starting point and destination</strong>
+            <small>We will verify the route and search for food before the trip starts.</small>
+          </div>
+        </section>
 
         <div class="field-grid">
           <label>
@@ -133,10 +166,13 @@
           </select>
         </label>
 
-        <button id="startTripButton" class="primary">Trust Us</button>
+        <div class="route-start-actions">
+          <button id="previewRouteButton" class="secondary" type="button">Preview Route</button>
+          <button id="startTripButton" class="primary" type="button">Trust Us</button>
+        </div>
         <button id="enableNotificationsButton" class="secondary">Enable Test Notifications</button>
 
-        <p class="trust-note">Use My Location enables beta route calculations with automatic demo fallback.</p>
+        <p class="trust-note">Typed starting points and current location both use live beta routing. No fixed Amsterdam-to-Myrtle Beach route is required.</p>
       </div>
 
       <div class="promise-strip">

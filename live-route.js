@@ -86,7 +86,23 @@
     const cache = loadJsonStorage(GEOCODE_CACHE_KEY);
 
     if (Array.isArray(cache[key]) && cache[key].length === 2) {
-      return { coordinates: cache[key], precision: "address cache" };
+      return {
+        coordinates: cache[key],
+        precision: "address cache",
+        label: String(query || "")
+      };
+    }
+
+    if (
+      cache[key] &&
+      Array.isArray(cache[key].coordinates) &&
+      cache[key].coordinates.length === 2
+    ) {
+      return {
+        coordinates: cache[key].coordinates,
+        precision: "address cache",
+        label: cache[key].label || String(query || "")
+      };
     }
 
     const params = new URLSearchParams({
@@ -103,9 +119,10 @@
 
       if (first?.lon && first?.lat) {
         const coordinates = [Number(first.lon), Number(first.lat)];
-        cache[key] = coordinates;
+        const label = first.display_name || String(query || "");
+        cache[key] = { coordinates, label };
         saveJsonStorage(GEOCODE_CACHE_KEY, cache);
-        return { coordinates, precision: "address geocode" };
+        return { coordinates, precision: "address geocode", label };
       }
     } catch (error) {
       console.warn("Geocoding fallback used for:", query, error);
@@ -114,7 +131,8 @@
     if (Array.isArray(fallbackCoordinates)) {
       return {
         coordinates: fallbackCoordinates.map(Number),
-        precision: "city fallback"
+        precision: "city fallback",
+        label: String(query || "")
       };
     }
 
@@ -147,13 +165,17 @@
     return result;
   }
 
-  async function prepareCuratedCandidates(candidates, progressCallback) {
+  async function prepareCuratedCandidates(candidates, routeSamples, progressCallback) {
+    const source = (candidates || []).filter(candidate => {
+      if (!Array.isArray(candidate.coordinates)) return false;
+      return distanceToSamples(candidate.coordinates, routeSamples) <= 35000;
+    });
     const prepared = [];
 
-    for (let index = 0; index < candidates.length; index += 1) {
-      const candidate = candidates[index];
+    for (let index = 0; index < source.length; index += 1) {
+      const candidate = source[index];
       progressCallback?.(
-        `Locating curated stops ${index + 1} of ${candidates.length}`
+        `Locating curated stops ${index + 1} of ${source.length}`
       );
 
       const result = await geocode(
@@ -169,7 +191,7 @@
         discoverySource: null
       });
 
-      if (index < candidates.length - 1) {
+      if (index < source.length - 1) {
         await delay(GEOCODE_DELAY_MS);
       }
     }
@@ -179,11 +201,28 @@
 
   async function buildLiveTrip({
     originCoordinates,
+    originText,
     destinationText,
     candidates,
     maxAddedMinutes,
     progressCallback
   }) {
+    if (!Array.isArray(originCoordinates) && !String(originText || "").trim()) {
+      throw new Error("Enter a starting point or use your current location.");
+    }
+    if (!String(destinationText || "").trim()) {
+      throw new Error("Enter a destination.");
+    }
+
+    progressCallback?.("Locating starting point");
+    const origin = Array.isArray(originCoordinates)
+      ? {
+          coordinates: originCoordinates.map(Number),
+          precision: "device location",
+          label: "Current location"
+        }
+      : await geocode(originText);
+
     progressCallback?.("Locating destination");
 
     const destinationFallback = destinationText
@@ -194,15 +233,19 @@
 
     const destination = await geocode(destinationText, destinationFallback);
 
+    if (distanceMeters(origin.coordinates, destination.coordinates) < 1500) {
+      throw new Error("Starting point and destination are too close together.");
+    }
+
     progressCallback?.("Calculating main route");
     const baseline = await route(
-      [originCoordinates, destination.coordinates],
+      [origin.coordinates, destination.coordinates],
       { steps: true, geometry: true }
     );
 
     const routeCoordinates =
       baseline?.geometry?.coordinates ||
-      [originCoordinates, destination.coordinates];
+      [origin.coordinates, destination.coordinates];
 
     const routeSamples = sampleRoute(routeCoordinates);
 
@@ -220,13 +263,10 @@
       discoveryStatus = "unavailable";
     }
 
-    const preparedCurated = await prepareCuratedCandidates(
+    const relevantCurated = await prepareCuratedCandidates(
       candidates,
+      routeSamples,
       progressCallback
-    );
-
-    const relevantCurated = preparedCurated.filter(candidate =>
-      distanceToSamples(candidate.coordinates, routeSamples) <= 35000
     );
 
     const mergedCandidates = selectCandidatesForRouting(
@@ -235,7 +275,11 @@
     );
 
     const session = {
+      originText: String(originText || ""),
+      originLabel: origin.label || String(originText || "Current location"),
+      originCoordinates: origin.coordinates,
       destinationText,
+      destinationLabel: destination.label || destinationText,
       destinationCoordinates: destination.coordinates,
       candidates: mergedCandidates,
       initialDurationSeconds: Number(baseline.duration || 0),
@@ -248,7 +292,7 @@
 
     const snapshot = await refreshLiveTrip({
       session,
-      originCoordinates,
+      originCoordinates: origin.coordinates,
       maxAddedMinutes,
       progressCallback,
       baselineRoute: baseline
@@ -384,6 +428,11 @@
       originCoordinates,
       destinationCoordinates: session.destinationCoordinates,
       metrics: {
+        originLabel: session.originLabel,
+        destinationLabel: session.destinationLabel,
+        totalMinutes: Math.round(Number(baseline.duration || 0) / 60),
+        totalMiles: metersToMiles(Number(baseline.distance || 0)),
+        totalCandidates: liveCandidates.length,
         progressPercent: Math.round(
           Math.max(durationProgress, distanceProgress) * 100
         ),
@@ -884,6 +933,8 @@ out center tags meta;`;
   }
 
   window.DetourEatsLiveRoute = {
+    geocode,
+    route,
     buildLiveTrip,
     refreshLiveTrip,
     distanceMeters
