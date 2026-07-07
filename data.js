@@ -12,6 +12,8 @@
 const candidates = [
   {
     id: "brooks-house-bbq",
+    coordinates: [-75.0638, 42.4529],
+    coordinatePrecision: "city fallback",
     priceLevel: "$$",
     quickStop: false,
     sitDown: true,
@@ -45,6 +47,8 @@ const candidates = [
   },
   {
     id: "park-diner-binghamton",
+    coordinates: [-75.9179, 42.0987],
+    coordinatePrecision: "city fallback",
     priceLevel: "$",
     quickStop: true,
     sitDown: true,
@@ -79,6 +83,8 @@ const candidates = [
 
   {
     id: "krumpes-donuts",
+    coordinates: [-77.71999, 39.6418],
+    coordinatePrecision: "city fallback",
     priceLevel: "$",
     quickStop: true,
     sitDown: false,
@@ -112,6 +118,8 @@ const candidates = [
   },
   {
     id: "bonnie-blue",
+    coordinates: [-78.1633, 39.1857],
+    coordinatePrecision: "city fallback",
     priceLevel: "$$",
     quickStop: true,
     sitDown: true,
@@ -145,6 +153,8 @@ const candidates = [
   },
   {
     id: "edelweiss-staunton",
+    coordinates: [-79.0717, 38.1496],
+    coordinatePrecision: "city fallback",
     priceLevel: "$$",
     quickStop: false,
     sitDown: true,
@@ -178,6 +188,8 @@ const candidates = [
   },
   {
     id: "zzq-richmond",
+    coordinates: [-77.436, 37.5407],
+    coordinatePrecision: "city fallback",
     priceLevel: "$$",
     quickStop: false,
     sitDown: true,
@@ -212,6 +224,8 @@ const candidates = [
   },
   {
     id: "parkers-wilson",
+    coordinates: [-77.9155, 35.7213],
+    coordinatePrecision: "city fallback",
     priceLevel: "$",
     quickStop: true,
     sitDown: true,
@@ -246,6 +260,8 @@ const candidates = [
   },
   {
     id: "mccabes-manning",
+    coordinates: [-80.2109, 33.6952],
+    coordinatePrecision: "city fallback",
     priceLevel: "$",
     quickStop: true,
     sitDown: true,
@@ -280,6 +296,8 @@ const candidates = [
   },
   {
     id: "johnny-ds-myrtle",
+    coordinates: [-78.8867, 33.6891],
+    coordinatePrecision: "city fallback",
     priceLevel: "$$",
     quickStop: false,
     sitDown: true,

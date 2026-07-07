@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0 Beta
+- Combined Trip Timeline, Food Zones, Live Location Beta, and live route calculations.
+- Added Use My Location with browser permission handling.
+- Added no-account OpenStreetMap geocoding and OSRM route calculations.
+- Added real route order, ETA, distance ahead, added trip time, and decision timing.
+- Added automatic passed-stop removal and controlled location-based refreshes.
+- Added next-six-stop timeline, current/best-if-wait/backup roles, and food-gap warnings.
+- Preserved the complete curated demo fallback when live services are unavailable.
+
+
 ## v0.9
 - Added Stop Here versus Skip and Wait decision consequences.
 - Added the next qualifying restaurant, approximate wait, score comparison, and route outlook.

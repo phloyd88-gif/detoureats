@@ -1,4 +1,4 @@
-# DetourEats App v0.9
+# DetourEats App v1.0 Beta
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -262,3 +262,43 @@ New:
 - Trip preferences are remembered on the same browser
 
 The route timing is still simulated, but the new logic changes the recommendation explanation and gives the driver a concrete reason to stop or wait.
+
+
+## v1.0 Beta: one combined route-intelligence update
+
+This update combines the planned route timeline, food zones, real device location,
+automatic progress, passed-stop removal, and live route calculations.
+
+### Works immediately
+
+- Trip timeline with the next six qualifying stops
+- Best decision now
+- Best option if the traveler waits
+- Reasonable backup
+- Food-zone summaries
+- Long-gap and weak-stretch warnings
+- Current preferences and adaptive skipping
+- Full curated demo fallback
+
+### Use My Location beta
+
+After the traveler selects **Use My Location** and grants browser permission:
+
+- Current GPS coordinates become the trip origin
+- The destination and restaurant addresses are located
+- A real driving route is calculated
+- Each restaurant is tested as a route waypoint
+- Added trip time, drive time ahead, ETA, route order, and decision timing update
+- Restaurants behind the driver or far outside the corridor are removed
+- The route refreshes after roughly two miles of movement or five minutes
+- No account, API token, or paid service is required
+
+### Prototype service limitation
+
+The no-account beta uses the public OpenStreetMap Nominatim geocoder and the
+public Project OSRM routing server. Requests are cached and controlled, and the
+app automatically returns to the curated route if either service is unavailable.
+
+These public endpoints are appropriate for prototype testing, not a production
+navigation service-level agreement. A production release should eventually use
+a dedicated hosted geocoder/routing provider or a self-hosted service.

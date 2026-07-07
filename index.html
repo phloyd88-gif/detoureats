@@ -28,6 +28,16 @@
       </div>
 
       <div class="panel setup-panel">
+
+        <section class="location-setup-card">
+          <div>
+            <span id="locationModeBadge" class="location-mode-badge demo">Demo route</span>
+            <strong id="locationSetupTitle">Use your real location</strong>
+            <small id="locationSetupStatus">Optional. The existing demo still works without it.</small>
+          </div>
+          <button id="useLocationButton" class="inline-location-button" type="button">Use My Location</button>
+        </section>
+
         <label>
           Where are you headed?
           <input id="destinationInput" type="text" value="Myrtle Beach, SC" placeholder="Destination">
@@ -126,7 +136,7 @@
         <button id="startTripButton" class="primary">Trust Us</button>
         <button id="enableNotificationsButton" class="secondary">Enable Test Notifications</button>
 
-        <p class="trust-note">Prototype demo: route and restaurants are simulated. Live route data comes next.</p>
+        <p class="trust-note">Use My Location enables beta route calculations with automatic demo fallback.</p>
       </div>
 
       <div class="promise-strip">
@@ -161,7 +171,10 @@
       <section id="driverStatusPanel" class="driver-status-panel" aria-label="Trip progress">
         <div class="driver-status-top">
           <div>
-            <span class="driver-kicker">Driver Mode</span>
+            <div class="driver-kicker-row">
+              <span class="driver-kicker">Driver Mode</span>
+              <span id="liveRouteBadge" class="live-route-badge demo">Demo</span>
+            </div>
             <strong id="routeProgressText">Starting route</strong>
           </div>
           <span id="routeRemainingText" class="remaining-pill">Demo estimate</span>
@@ -171,6 +184,7 @@
           <div id="routeProgressBar" class="route-progress-bar"></div>
         </div>
 
+        <div id="routingProgressMessage" class="routing-progress-message hidden"></div>
         <div class="driver-status-grid">
           <div>
             <span>Next food zone</span>
@@ -186,6 +200,19 @@
       <div id="decisionCard" class="decision-card"></div>
 
       <section id="decisionConsequencePanel" class="decision-consequence-panel" aria-live="polite"></section>
+
+      <section id="tripTimelinePanel" class="trip-timeline-panel" aria-live="polite">
+        <div class="timeline-heading">
+          <div>
+            <span>Road ahead</span>
+            <strong>Trip timeline and food zones</strong>
+          </div>
+          <span id="timelineModeLabel">Curated route</span>
+        </div>
+        <div id="foodZoneSummary" class="food-zone-summary"></div>
+        <div id="tripTimeline" class="trip-timeline"></div>
+      </section>
+
 
 
       <div class="button-row driver-primary-actions">
@@ -269,6 +296,7 @@
 
   <script src="data.js"></script>
   <script src="engine.js"></script>
+  <script src="live-route.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

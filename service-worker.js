@@ -1,10 +1,11 @@
-const CACHE_NAME = "detoureats-v0-9";
+const CACHE_NAME = "detoureats-v1-0-beta";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./data.js",
   "./engine.js",
+  "./live-route.js",
   "./app.js",
   "./manifest.webmanifest",
   "./icons/icon-192.svg",

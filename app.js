@@ -1,4 +1,4 @@
-/* DetourEats v0.3 app layer
+/* DetourEats v1.0 Beta app layer
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -6,6 +6,10 @@ const els = {
   setupScreen: document.getElementById("setupScreen"),
   driveScreen: document.getElementById("driveScreen"),
   destinationInput: document.getElementById("destinationInput"),
+  useLocationButton: document.getElementById("useLocationButton"),
+  locationModeBadge: document.getElementById("locationModeBadge"),
+  locationSetupTitle: document.getElementById("locationSetupTitle"),
+  locationSetupStatus: document.getElementById("locationSetupStatus"),
   maxAddedInput: document.getElementById("maxAddedInput"),
   tripModeInput: document.getElementById("tripModeInput"),
   stopTypeInput: document.getElementById("stopTypeInput"),
@@ -22,11 +26,17 @@ const els = {
   driverStatusPanel: document.getElementById("driverStatusPanel"),
   routeProgressBar: document.getElementById("routeProgressBar"),
   routeProgressText: document.getElementById("routeProgressText"),
+  liveRouteBadge: document.getElementById("liveRouteBadge"),
+  routingProgressMessage: document.getElementById("routingProgressMessage"),
   routeRemainingText: document.getElementById("routeRemainingText"),
   nextFoodZoneText: document.getElementById("nextFoodZoneText"),
   decisionCountdownText: document.getElementById("decisionCountdownText"),
   decisionCard: document.getElementById("decisionCard"),
   decisionConsequencePanel: document.getElementById("decisionConsequencePanel"),
+  tripTimelinePanel: document.getElementById("tripTimelinePanel"),
+  timelineModeLabel: document.getElementById("timelineModeLabel"),
+  foodZoneSummary: document.getElementById("foodZoneSummary"),
+  tripTimeline: document.getElementById("tripTimeline"),
   detailsPanel: document.getElementById("detailsPanel"),
   takeMeThereButton: document.getElementById("takeMeThereButton"),
   skipButton: document.getElementById("skipButton"),
@@ -49,6 +59,18 @@ const els = {
 let state = {
   started: false,
   destination: "Myrtle Beach, SC",
+  locationEnabled: false,
+  currentCoordinates: null,
+  locationAccuracy: null,
+  routingMode: "demo",
+  routingBusy: false,
+  routingMessage: "",
+  liveCandidates: null,
+  liveSession: null,
+  liveMetrics: null,
+  locationWatchId: null,
+  lastRoutedCoordinates: null,
+  lastLiveRefreshAt: 0,
   maxAdded: 10,
   tripMode: "balanced",
   stopType: "either",
@@ -73,6 +95,9 @@ let state = {
 };
 
 function getCandidates() {
+  if (state.routingMode === "live" && Array.isArray(state.liveCandidates)) {
+    return state.liveCandidates;
+  }
   if (Array.isArray(window.DETOUR_EATS_CANDIDATES)) return window.DETOUR_EATS_CANDIDATES;
   if (Array.isArray(window.candidates)) return window.candidates;
   if (Array.isArray(window.restaurants)) return window.restaurants;
@@ -83,11 +108,11 @@ function getEngineResult() {
   const candidates = getCandidates();
 
   const engineSettings = {
-    routePosition: state.routePosition,
+    routePosition: state.routingMode === "live" ? 0 : state.routePosition,
     currentTime: state.currentTime,
     maxAdded: state.maxAdded,
     maxAddedMinutes: state.maxAdded,
-    lookahead: state.lookahead,
+    lookahead: state.routingMode === "live" ? 99 : state.lookahead,
     candidatePool: state.candidatePool,
     hoursMode: state.hoursMode,
     tripMode: state.tripMode,
@@ -368,6 +393,7 @@ function render() {
   renderDriverStatus(pick, result, trip);
   renderDecisionCard(pick, trip, copy);
   renderDecisionConsequences(pick, result, trip);
+  renderTripTimeline(pick, result);
   renderDetailsPanel(pick, trip, copy);
   renderUpcoming(upcoming.length ? upcoming : getFallbackUpcoming(pick));
 
@@ -387,6 +413,46 @@ function render() {
 }
 
 function renderDriverStatus(pick, result, trip) {
+  if (state.routingMode === "live" && state.liveMetrics) {
+    const metrics = state.liveMetrics;
+    const progress = Number(metrics.progressPercent || 0);
+
+    els.routeProgressBar.style.width = `${progress}%`;
+    els.routeProgressText.textContent = `${progress}% of live trip`;
+    els.routeRemainingText.textContent =
+      `${formatDuration(metrics.remainingMinutes)} · ${Number(metrics.remainingMiles || 0).toFixed(0)} mi remaining`;
+    els.liveRouteBadge.textContent = state.routingBusy ? "Updating" : "Live";
+    els.liveRouteBadge.className =
+      `live-route-badge ${state.routingBusy ? "updating" : "live"}`;
+
+    const evaluated = (result?.evaluated || result?.upcoming || [])
+      .map(normalizePick)
+      .filter(Boolean)
+      .sort((a, b) => Number(a.minutesAhead ?? 999) - Number(b.minutesAhead ?? 999));
+
+    const nextStrong = evaluated.find(candidate =>
+      candidate.open !== false && candidate.score >= 86
+    );
+
+    els.nextFoodZoneText.textContent = nextStrong
+      ? `${nextStrong.city || nextStrong.name} · ${formatDuration(nextStrong.minutesAhead)} ahead`
+      : "No strong stop on the current live route";
+
+    els.decisionCountdownText.textContent = pick
+      ? getDecisionTiming(pick).label
+      : trip.key === "keep-driving"
+        ? "No decision needed"
+        : "Watching ahead";
+
+    els.routingProgressMessage.textContent =
+      state.routingMessage ||
+      `Live route updated ${formatRelativeUpdate(metrics.updatedAt)}`;
+    els.routingProgressMessage.classList.remove("hidden");
+    els.demoToggleButton.classList.add("hidden");
+    els.debugPanel.classList.add("hidden");
+    return;
+  }
+
   const candidates = getCandidates();
   const maxSeq = Math.max(1, ...candidates.map(candidate => Number(candidate.seq ?? 0)));
   const routePosition = Math.max(0, Math.min(maxSeq, Number(state.routePosition)));
@@ -409,6 +475,9 @@ function renderDriverStatus(pick, result, trip) {
   els.routeRemainingText.textContent = remainingMinutes
     ? `About ${formatDuration(remainingMinutes)} remaining`
     : "Destination area";
+  els.liveRouteBadge.textContent = "Demo";
+  els.liveRouteBadge.className = "live-route-badge demo";
+  els.routingProgressMessage.classList.add("hidden");
 
   if (nextStrong) {
     const minutesAhead = estimateMinutesAhead(nextStrong);
@@ -418,16 +487,20 @@ function renderDriverStatus(pick, result, trip) {
     els.nextFoodZoneText.textContent = "No strong zone in the current lookahead";
   }
 
-  if (pick) {
-    const timing = getDecisionTiming(pick);
-    els.decisionCountdownText.textContent = timing.label;
-  } else {
-    els.decisionCountdownText.textContent =
-      trip.key === "keep-driving" ? "No decision needed" : "Watching ahead";
-  }
+  els.decisionCountdownText.textContent = pick
+    ? getDecisionTiming(pick).label
+    : trip.key === "keep-driving"
+      ? "No decision needed"
+      : "Watching ahead";
+
+  els.demoToggleButton.classList.remove("hidden");
 }
 
 function estimateMinutesAhead(pick) {
+  if (pick?.liveRoute && Number.isFinite(Number(pick.minutesAhead))) {
+    return Math.max(0, Number(pick.minutesAhead));
+  }
+
   const distance = Math.max(
     0,
     Number(pick.seq ?? state.routePosition) - Number(state.routePosition)
@@ -436,6 +509,14 @@ function estimateMinutesAhead(pick) {
 }
 
 function getDecisionTiming(pick) {
+  if (pick?.liveRoute && Number.isFinite(Number(pick.decisionMinutes))) {
+    const minutes = Math.max(0, Number(pick.decisionMinutes));
+    return {
+      label: minutes <= 1 ? "Decide now" : `Decision in about ${minutes} min`,
+      detail: pick.decisionInstruction || "Be ready to leave the main route."
+    };
+  }
+
   const minutes = estimateMinutesAhead(pick);
 
   if (minutes <= 5) {
@@ -668,6 +749,155 @@ function renderDecisionConsequences(pick, result, trip) {
   `;
 }
 
+function renderTripTimeline(pick, result) {
+  if (!els.tripTimeline || !els.foodZoneSummary) return;
+
+  const candidates = (result?.evaluated || result?.upcoming || [])
+    .map(normalizePick)
+    .filter(candidate => candidate && candidate.open !== false)
+    .sort((a, b) => {
+      if (state.routingMode === "live") {
+        return Number(a.minutesAhead ?? 999) - Number(b.minutesAhead ?? 999);
+      }
+      return Number(a.seq ?? 999) - Number(b.seq ?? 999);
+    })
+    .slice(0, 6);
+
+  els.timelineModeLabel.textContent =
+    state.routingMode === "live" ? "Live location" : "Curated route";
+
+  if (!candidates.length) {
+    els.foodZoneSummary.innerHTML =
+      `<strong>Weak stretch ahead</strong><span>No qualifying stop in the current window.</span>`;
+    els.tripTimeline.innerHTML =
+      `<p class="timeline-empty">DetourEats is watching beyond the current route window.</p>`;
+    return;
+  }
+
+  const zones = analyzeTimelineZones(candidates);
+  els.foodZoneSummary.innerHTML = `
+    <strong>${escapeHtml(zones.headline)}</strong>
+    <span>${escapeHtml(zones.detail)}</span>
+  `;
+
+  els.tripTimeline.innerHTML = candidates.map((candidate, index) => {
+    const role = getTimelineRole(candidate, pick, index);
+    const timing = state.routingMode === "live"
+      ? `${formatDuration(candidate.minutesAhead)} ahead`
+      : `${formatDuration(estimateMinutesAhead(candidate))} ahead`;
+    const gap = index === 0
+      ? ""
+      : getTimelineGap(candidates[index - 1], candidate);
+    const zoneClass = candidate.score >= 92
+      ? "strong-zone"
+      : candidate.score >= 84
+        ? "good-zone"
+        : "backup-zone";
+
+    return `
+      <article class="timeline-stop ${zoneClass} ${pick?.id === candidate.id ? "current" : ""}">
+        <div class="timeline-line">
+          <span class="timeline-dot"></span>
+        </div>
+        <div class="timeline-stop-body">
+          <div class="timeline-stop-top">
+            <span>${escapeHtml(role)}</span>
+            <strong>${candidate.score}</strong>
+          </div>
+          <h3>${escapeHtml(candidate.name)}</h3>
+          <p>${escapeHtml(candidate.city || candidate.category || "")}</p>
+          <div class="timeline-meta">
+            <span>${escapeHtml(timing)}</span>
+            <span>Adds ${candidate.added} min</span>
+          </div>
+          ${gap ? `<small>${escapeHtml(gap)}</small>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function analyzeTimelineZones(candidates) {
+  const strong = candidates.filter(candidate => candidate.score >= 88);
+  const first = candidates[0];
+  const second = candidates[1];
+
+  if (!strong.length) {
+    return {
+      headline: "Limited options ahead",
+      detail: "Usable stops exist, but none currently clears the strong-stop threshold."
+    };
+  }
+
+  if (strong.length >= 3) {
+    return {
+      headline: "Strong food zone ahead",
+      detail: "Several qualifying choices are coming, so there is room to wait."
+    };
+  }
+
+  if (!second) {
+    return {
+      headline: "Last good stop",
+      detail: "Only one qualifying option remains in the current route window."
+    };
+  }
+
+  const gapMinutes = getCandidateMinutes(second) - getCandidateMinutes(first);
+  if (gapMinutes >= 75) {
+    return {
+      headline: "Long weak stretch after this",
+      detail: `The next qualifying option is roughly ${formatDuration(gapMinutes)} later.`
+    };
+  }
+
+  if (second.score >= first.score + 6) {
+    return {
+      headline: "Route improves ahead",
+      detail: "A meaningfully stronger option is coming if you are comfortable waiting."
+    };
+  }
+
+  if (first.score >= second.score + 6) {
+    return {
+      headline: "Best food is earlier",
+      detail: "The current option is stronger than what follows."
+    };
+  }
+
+  return {
+    headline: "Options remain healthy",
+    detail: "Another similarly rated stop follows without a major gap."
+  };
+}
+
+function getTimelineRole(candidate, pick, index) {
+  if (pick?.id === candidate.id) return "Best decision now";
+  if (index === 1) return "Best if you wait";
+  if (index === 2) return "Reasonable backup";
+  return "Later option";
+}
+
+function getTimelineGap(previous, current) {
+  const gap = Math.max(0, getCandidateMinutes(current) - getCandidateMinutes(previous));
+  if (gap < 25) return "Close behind the prior option";
+  if (gap < 60) return `About ${gap} minutes after the prior option`;
+  return `Food gap: about ${formatDuration(gap)}`;
+}
+
+function getCandidateMinutes(candidate) {
+  return state.routingMode === "live"
+    ? Number(candidate.minutesAhead || 0)
+    : estimateMinutesAhead(candidate);
+}
+
+function formatRelativeUpdate(timestamp) {
+  const seconds = Math.max(0, Math.round((Date.now() - Number(timestamp || 0)) / 1000));
+  if (seconds < 15) return "just now";
+  if (seconds < 60) return `${seconds} seconds ago`;
+  return `${Math.round(seconds / 60)} minutes ago`;
+}
+
 function renderDetailsPanel(pick, trip, copy) {
   const rationale = copy.rationale || [];
   if (!pick) {
@@ -717,6 +947,8 @@ function renderDetailsPanel(pick, trip, copy) {
       <div class="trust-row"><span>Source</span><strong>${escapeHtml(pick.sourceType || "Curated source")}</strong></div>
       <div class="trust-row"><span>Data confidence</span><strong>${escapeHtml(pick.confidence || "Medium")}</strong></div>
       <div class="trust-row"><span>Last checked</span><strong>${escapeHtml(pick.verifiedDate || "Prototype dataset")}</strong></div>
+      ${pick.liveRoute ? `<div class="trust-row"><span>Route mode</span><strong>Live location beta</strong></div>` : ""}
+      ${pick.liveRoute ? `<div class="trust-row"><span>Distance ahead</span><strong>${escapeHtml(String(pick.distanceAheadMiles ?? "—"))} miles</strong></div>` : ""}
       ${sourceLink}
     </div>
 
@@ -735,7 +967,9 @@ function renderDetailsPanel(pick, trip, copy) {
 
     <div class="editorial-section">
       <h3>DetourEats judgment</h3>
-      <p>Detour Score, route position, arrival time, and added-trip time are editorial prototype estimates until live routing is connected.</p>
+      <p>${pick.liveRoute
+        ? "Route order, distance ahead, arrival timing, decision timing, and added trip time use the current beta route calculation. Restaurant hours and Detour Score remain curated."
+        : "Route position, arrival time, and added-trip time are curated estimates in demo mode."}</p>
     </div>
     ${risk}
   `;
@@ -873,7 +1107,9 @@ function showToast(title, message) {
   setTimeout(() => els.toast.classList.add("hidden"), 4500);
 }
 
-function startTrip() {
+async function startTrip() {
+  if (state.routingBusy) return;
+
   state.started = true;
   state.destination = els.destinationInput.value || "your destination";
   state.maxAdded = Number(els.maxAddedInput.value);
@@ -888,23 +1124,113 @@ function startTrip() {
   state.minimumScore = 0;
   state.lastSkipAdjustment = "";
   state.detailsOpen = false;
-  state.currentTime = Number(els.currentTimeInput.value);
+  state.currentTime = state.locationEnabled
+    ? getActualCurrentMinutes()
+    : Number(els.currentTimeInput.value);
   state.routePosition = Number(els.routePositionInput?.value || 0);
   state.lookahead = Number(els.lookaheadInput?.value || 5);
   state.candidatePool = els.candidatePoolInput?.value || "All";
   state.hoursMode = els.hoursModeInput?.value || "requireOpen";
   state.skippedIds = new Set();
+  state.routingMode = "demo";
+  state.liveCandidates = null;
+  state.liveSession = null;
+  state.liveMetrics = null;
   savePreferences();
 
   els.setupScreen.classList.add("hidden");
   els.driveScreen.classList.remove("hidden");
 
   render();
-  showToast("Trust Us Mode is on", "We’ll keep the main screen simple and only surface the best decision.");
+
+  if (state.locationEnabled && state.currentCoordinates) {
+    await activateLiveRoute();
+  } else {
+    showToast(
+      "Trust Us Mode is on",
+      "Using the curated route. Use My Location next time for live beta timing."
+    );
+  }
+}
+
+async function activateLiveRoute() {
+  const service = window.DetourEatsLiveRoute;
+  if (!service || !state.currentCoordinates) return;
+
+  setRoutingBusy(true, "Preparing live route");
+
+  try {
+    const result = await service.buildLiveTrip({
+      originCoordinates: state.currentCoordinates,
+      destinationText: state.destination,
+      candidates: window.DETOUR_EATS_CANDIDATES || [],
+      maxAddedMinutes: state.maxAdded,
+      progressCallback: updateRoutingMessage
+    });
+
+    state.liveSession = result.session;
+    applyLiveSnapshot(result.snapshot);
+    startLocationWatch();
+
+    showToast(
+      "Live location active",
+      "Recommendations now update from your real position."
+    );
+  } catch (error) {
+    console.error(error);
+    state.routingMode = "demo";
+    state.routingMessage = "";
+    showToast(
+      "Using curated route",
+      "The live beta could not calculate this trip, so DetourEats kept working in demo mode."
+    );
+  } finally {
+    setRoutingBusy(false);
+    render();
+  }
+}
+
+function applyLiveSnapshot(snapshot) {
+  state.liveCandidates = snapshot?.candidates || [];
+  state.liveMetrics = snapshot?.metrics || null;
+  state.routingMode = state.liveCandidates.length ? "live" : "demo";
+  state.routingMessage = "";
+  state.routePosition = 0;
+  state.lookahead = 99;
+  state.currentTime = getActualCurrentMinutes();
+  state.lastRoutedCoordinates = snapshot?.originCoordinates || state.currentCoordinates;
+  state.lastLiveRefreshAt = Date.now();
+}
+
+function setRoutingBusy(busy, message = "") {
+  state.routingBusy = Boolean(busy);
+  updateRoutingMessage(message);
+}
+
+function updateRoutingMessage(message) {
+  state.routingMessage = message || "";
+  if (!els.routingProgressMessage) return;
+
+  if (message) {
+    els.routingProgressMessage.textContent = message;
+    els.routingProgressMessage.classList.remove("hidden");
+  } else {
+    els.routingProgressMessage.classList.add("hidden");
+  }
+}
+
+function getActualCurrentMinutes() {
+  const now = new Date();
+  return now.getHours() * 60 + now.getMinutes();
 }
 
 function goBack() {
+  stopLocationWatch();
   state.started = false;
+  state.routingMode = "demo";
+  state.liveCandidates = null;
+  state.liveSession = null;
+  state.liveMetrics = null;
   state.detailsOpen = false;
   els.driveScreen.classList.add("hidden");
   els.setupScreen.classList.remove("hidden");
@@ -985,8 +1311,143 @@ function takeMeThere() {
   }
 
   const query = encodeURIComponent(pick.name);
-  const url = pick.mapsUrl || pick.url || `https://www.google.com/maps/search/?api=1&query=${query}`;
+  const coordinateDestination = Array.isArray(pick.coordinates)
+    ? `${pick.coordinates[1]},${pick.coordinates[0]}`
+    : "";
+  const url = coordinateDestination
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(coordinateDestination)}&travelmode=driving`
+    : pick.mapsUrl || pick.url || `https://www.google.com/maps/search/?api=1&query=${query}`;
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+async function requestCurrentLocation() {
+  if (!navigator.geolocation) {
+    updateLocationSetup("Location unavailable", "This browser does not support location.", "error");
+    return;
+  }
+
+  els.useLocationButton.disabled = true;
+  els.useLocationButton.textContent = "Locating…";
+  updateLocationSetup("Requesting location", "Allow location access when your browser asks.", "working");
+
+  try {
+    const position = await new Promise((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 18000,
+        maximumAge: 30000
+      });
+    });
+
+    state.currentCoordinates = [
+      Number(position.coords.longitude),
+      Number(position.coords.latitude)
+    ];
+    state.locationAccuracy = Number(position.coords.accuracy || 0);
+    state.locationEnabled = true;
+
+    els.useLocationButton.textContent = "Location Ready";
+    updateLocationSetup(
+      "Real location ready",
+      `Accuracy is approximately ${Math.round(state.locationAccuracy)} meters.`,
+      "live"
+    );
+  } catch (error) {
+    state.locationEnabled = false;
+    state.currentCoordinates = null;
+    els.useLocationButton.textContent = "Use My Location";
+
+    const message = error?.code === 1
+      ? "Location permission was denied. The curated route will still work."
+      : error?.code === 3
+        ? "Location request timed out. Try again when signal is stronger."
+        : "Your location could not be determined.";
+
+    updateLocationSetup("Demo route remains available", message, "error");
+  } finally {
+    els.useLocationButton.disabled = false;
+  }
+}
+
+function updateLocationSetup(title, status, mode = "demo") {
+  els.locationSetupTitle.textContent = title;
+  els.locationSetupStatus.textContent = status;
+  els.locationModeBadge.textContent = mode === "live" ? "Location ready" : mode === "working" ? "Working" : "Demo route";
+  els.locationModeBadge.className = `location-mode-badge ${mode}`;
+}
+
+function startLocationWatch() {
+  stopLocationWatch();
+  if (!state.locationEnabled || !navigator.geolocation) return;
+
+  state.locationWatchId = navigator.geolocation.watchPosition(
+    handleLocationUpdate,
+    error => console.warn("Location update unavailable", error),
+    {
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 20000
+    }
+  );
+}
+
+function stopLocationWatch() {
+  if (state.locationWatchId !== null && navigator.geolocation?.clearWatch) {
+    navigator.geolocation.clearWatch(state.locationWatchId);
+  }
+  state.locationWatchId = null;
+}
+
+async function handleLocationUpdate(position) {
+  const coordinates = [
+    Number(position.coords.longitude),
+    Number(position.coords.latitude)
+  ];
+
+  state.currentCoordinates = coordinates;
+  state.locationAccuracy = Number(position.coords.accuracy || 0);
+
+  if (
+    state.routingMode !== "live" ||
+    state.routingBusy ||
+    !state.liveSession
+  ) {
+    return;
+  }
+
+  const moved = window.DetourEatsLiveRoute.distanceMeters(
+    state.lastRoutedCoordinates,
+    coordinates
+  );
+  const elapsed = Date.now() - Number(state.lastLiveRefreshAt || 0);
+
+  // Refresh only after about 2 miles or five minutes to protect public services.
+  if (moved >= 3200 || elapsed >= 300000) {
+    await refreshLiveRoute(coordinates);
+  }
+}
+
+async function refreshLiveRoute(coordinates) {
+  if (!state.liveSession || state.routingBusy) return;
+
+  setRoutingBusy(true, "Updating route from your new position");
+
+  try {
+    const snapshot = await window.DetourEatsLiveRoute.refreshLiveTrip({
+      session: state.liveSession,
+      originCoordinates: coordinates,
+      maxAddedMinutes: state.maxAdded,
+      progressCallback: updateRoutingMessage
+    });
+
+    applyLiveSnapshot(snapshot);
+  } catch (error) {
+    console.error(error);
+    state.routingMessage = "Live update delayed; last route remains active.";
+  } finally {
+    setRoutingBusy(false);
+    render();
+  }
 }
 
 async function enableNotifications() {
@@ -1018,6 +1479,10 @@ function updateFromControls() {
 }
 
 function toggleDemoControls() {
+  if (state.routingMode === "live") {
+    showToast("Live route active", "Demo route controls are hidden while real location is active.");
+    return;
+  }
   const hidden = els.debugPanel.classList.toggle("hidden");
   els.demoToggleButton.textContent = hidden ? "Show Demo Controls" : "Hide Demo Controls";
 }
@@ -1038,6 +1503,7 @@ function registerServiceWorker() {
 }
 
 els.startTripButton.addEventListener("click", startTrip);
+els.useLocationButton.addEventListener("click", requestCurrentLocation);
 els.backButton.addEventListener("click", goBack);
 els.skipButton.addEventListener("click", skipPick);
 els.closeSkipPanelButton?.addEventListener("click", closeSkipPanel);
@@ -1077,5 +1543,6 @@ els.demoToggleButton.addEventListener("click", toggleDemoControls);
   });
 });
 
+window.addEventListener("beforeunload", stopLocationWatch);
 loadPreferences();
 registerServiceWorker();
