@@ -1,18 +1,18 @@
-const CACHE_NAME = "detoureats-v1-9-3-preference-integrity";
+const CACHE_NAME = "detoureats-v1-9-4-route-timing-fallback";
 
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=1.9.3",
-  "./data.js?v=1.9.3",
-  "./engine.js?v=1.9.3",
-  "./review-evidence.js?v=1.9.3",
-  "./place-status.js?v=1.9.3",
-  "./live-route.js?v=1.9.3",
-  "./address-search.js?v=1.9.3",
-  "./restaurant-intelligence.js?v=1.9.3",
-  "./app.js?v=1.9.3",
-  "./manifest.webmanifest?v=1.9.3",
+  "./styles.css?v=1.9.4",
+  "./data.js?v=1.9.4",
+  "./engine.js?v=1.9.4",
+  "./review-evidence.js?v=1.9.4",
+  "./place-status.js?v=1.9.4",
+  "./live-route.js?v=1.9.4",
+  "./address-search.js?v=1.9.4",
+  "./restaurant-intelligence.js?v=1.9.4",
+  "./app.js?v=1.9.4",
+  "./manifest.webmanifest?v=1.9.4",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
 ];

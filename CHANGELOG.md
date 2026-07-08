@@ -1,5 +1,15 @@
 # DetourEats Changelog
 
+## v1.9.4 Route Timing and Skip Fallbacks
+
+- Fixed Road Ahead wait-time estimates using actual `minutesAhead` values from the live route instead of multiplying candidate sequence gaps by 42 minutes.
+- Next alternatives are now ordered by real forward route timing.
+- Removed the hard minimum-score mutation from **Wait for something better**.
+- Converted all skip reasons into one-step selection intents so they do not silently change the trip’s saved mode, price, detour, or timing settings.
+- Added a safe widened fallback window when stale skip settings would otherwise produce an empty result.
+- Replaced misleading quality-bar copy with an explicit no-remaining-open-alternative message when the candidate set is genuinely exhausted.
+- Reset browser and service-worker asset versions to v1.9.4.
+
 ## v1.9.3 Preference Integrity
 
 - Added a semantic validation layer for every skip reason so the replacement recommendation matches the reason selected.

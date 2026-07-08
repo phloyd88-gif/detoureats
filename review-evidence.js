@@ -1,4 +1,4 @@
-/* DetourEats v1.9.3 review evidence client */
+/* DetourEats v1.9.4 review evidence client */
 (function () {
   "use strict";
 

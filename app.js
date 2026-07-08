@@ -1,4 +1,4 @@
-/* DetourEats v1.9.3 Review-Backed Scoring
+/* DetourEats v1.9.4 Review-Backed Scoring
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -1480,13 +1480,13 @@ function renderDecisionCard(pick, trip, copy) {
         <div class="score-hero score-hero-empty">
           <span>Detour Score</span>
           <strong>—</strong>
-          <small>Waiting for a qualifying stop</small>
+          <small>${state.skipIntent ? "No remaining open alternative" : "Waiting for a qualifying stop"}</small>
         </div>
         <h2>${escapeHtml(trip.headline)}</h2>
         <p>${escapeHtml(trip.subline)}</p>
         <div class="driver-callout">
-          <strong>No action needed.</strong>
-          <span>DetourEats will surface the next worthwhile decision.</span>
+          <strong>${state.skipIntent ? "No alternative is currently available." : "No action needed."}</strong>
+          <span>${state.skipIntent ? "The current route results contain no remaining open stop after your skips." : "DetourEats will surface the next worthwhile decision."}</span>
         </div>
       </div>
     `;
@@ -1591,9 +1591,9 @@ function renderDecisionConsequences(pick, result, trip) {
     panel.innerHTML = `
       <div class="consequence-heading">
         <span>Decision impact</span>
-        <strong>No decision needed yet</strong>
+        <strong>${state.skipIntent ? "No remaining alternative" : "No decision needed yet"}</strong>
       </div>
-      <p>DetourEats is still watching for the next stop that clears your quality bar.</p>
+      <p>${state.skipIntent ? "No other open stop remains in the current route results." : "DetourEats is still watching for the next worthwhile stop."}</p>
     `;
     return;
   }
@@ -2894,22 +2894,25 @@ function applySkipReason(reason) {
     ...extra
   });
 
+  // Skip reasons are one-step requests. They should influence the next pick,
+  // not silently rewrite the user's trip settings or create hard filters that
+  // can strand the interface on an empty result.
+  state.deferUntilSeq = Number(state.routePosition);
+  state.minimumScore = 0;
+
   switch (reason) {
     case "too-far": {
-      const tighterLimit = Math.max(3, Math.floor(referenceAdded - 1));
-      state.maxAdded = Math.min(state.maxAdded, tighterLimit);
-      state.skipIntent = makeIntent({ targetAddedMinutes: tighterLimit });
+      const targetAdded = Math.max(0, Math.floor(referenceAdded - 1));
+      state.skipIntent = makeIntent({ targetAddedMinutes: targetAdded });
       state.lastSkipAdjustment = `Looking for a stop that adds less than ${Math.max(1, Math.round(referenceAdded))} minutes.`;
-      if (els.maxAddedInput) els.maxAddedInput.value = String(state.maxAdded);
-      showToast("Looking for a closer detour", "The next result must add less trip time when one is available.");
+      showToast("Looking for a closer detour", "The next result will be checked against the skipped stop, with any fallback clearly labeled.");
       break;
     }
 
     case "not-hungry":
-      state.deferUntilSeq = Math.max(state.deferUntilSeq, Number(pick.seq || state.routePosition) + 2);
       state.skipIntent = makeIntent({ minimumLaterMinutes: 10 });
-      state.lastSkipAdjustment = "Recommendations moved farther down the route.";
-      showToast("We’ll wait", "The next result will be later on the route, not just a different nearby stop.");
+      state.lastSkipAdjustment = "Looking farther down the route without hiding nearer fallback options.";
+      showToast("We’ll wait", "The next result will be later on the route when one is available.");
       break;
 
     case "wrong-cuisine": {
@@ -2923,32 +2926,24 @@ function applySkipReason(reason) {
     }
 
     case "too-expensive":
-      state.pricePreference = "budget";
       state.skipIntent = makeIntent({ preferCheaper: true });
-      state.lastSkipAdjustment = "Now prioritizing a less expensive stop without hiding every alternative.";
-      if (els.pricePreferenceInput) els.pricePreferenceInput.value = "budget";
+      state.lastSkipAdjustment = "Now prioritizing a less expensive stop without changing the trip's saved price setting.";
       showToast("Looking for a cheaper stop", "The app will prefer a lower price tier and clearly label any fallback.");
       break;
 
     case "need-faster":
-      state.deferUntilSeq = Number(state.routePosition);
-      state.tripMode = "hungry";
-      state.stopType = "either";
-      state.maxAdded = Math.min(state.maxAdded, Math.max(5, Math.floor(referenceAdded || state.maxAdded)));
       state.skipIntent = makeIntent({ requireSooner: true, requireLowerDetour: true });
-      state.lastSkipAdjustment = "Looking for a stop that is sooner and adds less trip time.";
-      if (els.tripModeInput) els.tripModeInput.value = "hungry";
-      if (els.stopTypeInput) els.stopTypeInput.value = "either";
-      if (els.maxAddedInput) els.maxAddedInput.value = String(state.maxAdded);
+      state.lastSkipAdjustment = "Looking for a stop that is actually sooner or reduces detour time.";
       showToast("Looking for a genuinely faster stop", "A farther-away result will not be presented as faster.");
       break;
 
-    case "show-better":
-      state.minimumScore = Math.min(99, Math.max(state.minimumScore, Number(pick.score || 0) + 3));
-      state.skipIntent = makeIntent({ targetScore: state.minimumScore });
-      state.lastSkipAdjustment = `Looking for a stop scoring ${state.minimumScore} or better, with a clearly labeled fallback if none exists.`;
-      showToast("Looking for something better", "We’ll prefer a stronger stop without hiding every other option.");
+    case "show-better": {
+      const targetScore = Math.min(99, Number(pick.score || 0) + 3);
+      state.skipIntent = makeIntent({ targetScore });
+      state.lastSkipAdjustment = `Looking for a stop scoring ${targetScore} or better, while keeping the strongest fallback visible.`;
+      showToast("Looking for something better", "We’ll prefer a stronger stop without creating a hard score cutoff.");
       break;
+    }
 
     case "other":
       state.lastSkipAdjustment = "That stop was removed without changing your trip preferences.";
@@ -3934,7 +3929,7 @@ function escapeHtml(value) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.9.3", {
+      .register("service-worker.js?v=1.9.4", {
         updateViaCache: "none"
       })
       .then(registration => {

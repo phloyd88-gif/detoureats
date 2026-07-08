@@ -1,13 +1,15 @@
-# DetourEats App v1.9.3 Preference Integrity
+# DetourEats App v1.9.4 Route Timing and Skip Fallbacks
 
-This release keeps the v1.9.2 skip-flow and Road Ahead improvements while making every skip reason produce a semantically valid replacement or a clearly labeled fallback.
+This release corrects Road Ahead timing and makes skip reasons one-step preferences rather than hidden permanent trip filters.
 
-## v1.9.3 highlights
+## v1.9.4 highlights
 
-- **Need something faster** never labels a farther-away restaurant as faster.
-- Skip choices are checked against the skipped restaurant’s arrival time, added trip time, price tier, cuisine, and score as applicable.
-- Sparse routes return the best available fallback with an explanation instead of silently violating the selected preference or producing no results.
-- The recommendation card shows whether the requested adjustment was matched.
+- Road Ahead wait times now use each restaurant’s actual live-route minutes instead of multiplying sequence positions by a fixed interval.
+- The next alternative is selected by real forward route timing, not by sequence gap alone.
+- **Wait for something better** no longer creates a hard minimum-score threshold.
+- Skip reasons no longer silently rewrite trip mode, price, detour, or timing settings.
+- If an earlier adjustment empties the normal window, DetourEats widens to the remaining safe, open, forward candidates and labels the fallback.
+- Empty results now mean there is genuinely no remaining open alternative in the current route results.
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -45,7 +47,7 @@ This is still a prototype.
 
 Current placeholder assumptions:
 - Route position is simulated with a hidden demo slider.
-- Candidate ETA assumes about 45 minutes between candidate sequence stops.
+- Curated/demo route timing uses a consistent conservative estimate; live routes use calculated route minutes.
 - Candidate data is seeded from test-route research.
 - Restaurant hours are sample prototype hours, not verified live hours.
 - Google Maps handoff opens a restaurant search, not a fully managed route waypoint flow.

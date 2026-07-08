@@ -1,4 +1,4 @@
-/* DetourEats v1.9.3 review-backed evidence API */
+/* DetourEats v1.9.4 review-backed evidence API */
 const MAX_CANDIDATES = 5;
 const TIMEOUT_MS = 7500;
 let redditToken = { value: "", expiresAt: 0 };
@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
     const configured = configuredProviders();
     if (!configured.length) {
       return end(res, 200, {
-        version: "1.9.3",
+        version: "1.9.4",
         status: "not_configured",
         configuredProviders: [],
         results: candidates.map(c => ({ key: c.key, status: "not_configured" }))
@@ -29,7 +29,7 @@ module.exports = async function handler(req, res) {
 
     const results = [];
     for (const candidate of candidates) results.push(await evidenceFor(candidate, configured));
-    return end(res, 200, { version: "1.9.3", status: "ok", configuredProviders: configured, results });
+    return end(res, 200, { version: "1.9.4", status: "ok", configuredProviders: configured, results });
   } catch (error) {
     console.error("restaurant-evidence", error);
     return end(res, 500, { error: "evidence_failed", message: "Live restaurant evidence could not be loaded." });
@@ -178,7 +178,7 @@ async function redditEvidence(candidate) {
   if (!token) return null;
   const headers = {
     Authorization: `Bearer ${token}`,
-    "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.3 (restaurant evidence)"
+    "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.4 (restaurant evidence)"
   };
   const query = [`\"${candidate.name}\"`, candidate.city ? `\"${candidate.city}\"` : "", "(food OR restaurant OR cafe OR coffee OR pizza OR burger)"].filter(Boolean).join(" ");
   const params = new URLSearchParams({ q: query, sort: "relevance", t: "all", limit: "8", type: "link", raw_json: "1" });
@@ -227,7 +227,7 @@ async function redditAccessToken() {
     headers: {
       Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.3 (restaurant evidence)"
+      "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.4 (restaurant evidence)"
     },
     body: "grant_type=client_credentials"
   });

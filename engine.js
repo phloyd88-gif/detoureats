@@ -1,4 +1,4 @@
-/* DetourEats v1.9.3 Review-Backed Scoring Engine
+/* DetourEats v1.9.4 Review-Backed Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -32,9 +32,22 @@ It is restaurant quality filtered through trip fit.
       usedDeferredFallback = true;
     }
 
-    const scored = visible
+    let scored = visible
       .map(candidate => scoreCandidate(candidate, settings, normalized))
       .sort((a, b) => b.detourScore - a.detourScore);
+
+    // Skip reasons are one-step preferences, not hard filters. If earlier trip
+    // adjustments leave the normal candidate window empty, widen the search to
+    // the remaining safe, forward, open candidates rather than showing a false
+    // "quality bar" dead end.
+    let usedSkipFallbackWindow = false;
+    if (!scored.length && settings.skipIntent) {
+      visible = filterCandidatesForSkipFallback(normalized, settings);
+      scored = visible
+        .map(candidate => scoreCandidate(candidate, settings, normalized))
+        .sort((a, b) => b.detourScore - a.detourScore);
+      usedSkipFallbackWindow = scored.length > 0;
+    }
 
     const minimumScore = number(settings.minimumScore, 0);
     const eligible = minimumScore > 0
@@ -125,7 +138,13 @@ It is restaurant quality filtered through trip fit.
             label: "No later stop available",
             message: "The route window has no later qualifying stop, so the best remaining option is shown as a fallback."
           }
-        : skipSelection.outcome
+        : (skipSelection.outcome || (usedSkipFallbackWindow
+          ? {
+              matched: false,
+              label: "Best remaining fallback",
+              message: "The normal preference window had no result, so DetourEats widened the search and kept the best safe option visible."
+            }
+          : null))
     };
   }
 
@@ -136,8 +155,15 @@ It is restaurant quality filtered through trip fit.
     const decision = Number(candidate?.decisionMinutes);
     if (Number.isFinite(decision)) return Math.max(0, decision + 10);
 
+    // Demo/curated route sequence values are ordering markers, not 45-minute
+    // route segments. Use the same conservative 18-minute estimate shown by
+    // the client UI so timing comparisons remain internally consistent.
     const routePosition = number(settings.routePosition, 0);
-    return Math.max(0, number(candidate?.seq, routePosition) - routePosition) * 45;
+    const sequenceGap = Math.max(
+      0,
+      number(candidate?.seq, routePosition) - routePosition
+    );
+    return sequenceGap === 0 ? 3 : Math.max(6, sequenceGap * 18);
   }
 
   function candidateCuisine(candidate) {
@@ -467,6 +493,23 @@ It is restaurant quality filtered through trip fit.
         ].filter(Boolean).join(" ").toLowerCase();
         if (!haystack.includes(String(settings.candidatePool).toLowerCase())) return false;
       }
+      return true;
+    });
+  }
+
+  function filterCandidatesForSkipFallback(candidates, settings) {
+    const routePosition = number(settings.routePosition, 0);
+    const skippedIds = new Set((settings.skippedIds || []).map(String));
+    const chainPolicy = String(settings.chainPolicy || "avoid").toLowerCase();
+
+    return candidates.filter(candidate => {
+      if (candidate.exceptionalOnly) return false;
+      if (skippedIds.has(String(candidate.id))) return false;
+      if (number(candidate.seq, routePosition) < routePosition) return false;
+      if (candidate.backtracking) return false;
+      if (candidate.openAtArrival === false) return false;
+      if (["closed", "stale-unverified"].includes(candidate.operationalStatus)) return false;
+      if (chainPolicy === "avoid" && candidate.chain) return false;
       return true;
     });
   }
@@ -1232,11 +1275,11 @@ It is restaurant quality filtered through trip fit.
 
     const strong = scored
       .filter(c => c.detourScore >= 88 && c.openAtArrival !== false)
-      .sort((a, b) => a.seq - b.seq);
+      .sort((a, b) => candidateMinutesAhead(a, settings) - candidateMinutesAhead(b, settings));
 
     const acceptable = scored
       .filter(c => c.detourScore >= 76 && c.openAtArrival !== false)
-      .sort((a, b) => a.seq - b.seq);
+      .sort((a, b) => candidateMinutesAhead(a, settings) - candidateMinutesAhead(b, settings));
 
     if (strong.length === 0) {
       return {
@@ -1250,10 +1293,9 @@ It is restaurant quality filtered through trip fit.
     }
 
     const first = strong[0];
-    const routePosition = number(settings.routePosition, 0);
-    const segmentsAway = Math.max(0, first.seq - routePosition);
+    const firstMinutesAhead = candidateMinutesAhead(first, settings);
 
-    if (strong.length === 1 && segmentsAway <= 2) {
+    if (strong.length === 1 && firstMinutesAhead <= 45) {
       return {
         level: "Last strong option",
         strongOptionsAhead: 1,
@@ -1262,7 +1304,7 @@ It is restaurant quality filtered through trip fit.
       };
     }
 
-    if (segmentsAway >= 4) {
+    if (firstMinutesAhead >= 90) {
       return {
         level: "Better later",
         strongOptionsAhead: strong.length,
@@ -1282,15 +1324,19 @@ It is restaurant quality filtered through trip fit.
   function findNextAlternative(pick, rankedCandidates, settings) {
     if (!pick) return rankedCandidates[0] || null;
 
+    const pickMinutes = candidateMinutesAhead(pick, settings);
+
     return rankedCandidates
       .filter(candidate =>
         candidate.id !== pick.id &&
         candidate.openAtArrival !== false &&
-        Number(candidate.seq) > Number(pick.seq)
+        candidateMinutesAhead(candidate, settings) > pickMinutes
       )
       .sort((a, b) => {
-        const seqGap = Number(a.seq) - Number(b.seq);
-        if (seqGap !== 0) return seqGap;
+        const minuteGap =
+          candidateMinutesAhead(a, settings) -
+          candidateMinutesAhead(b, settings);
+        if (minuteGap !== 0) return minuteGap;
         return Number(b.detourScore) - Number(a.detourScore);
       })[0] || null;
   }
@@ -1301,16 +1347,20 @@ It is restaurant quality filtered through trip fit.
         level: "Watching",
         label: "No decision yet",
         stopMessage: "DetourEats is still watching the route.",
-        skipMessage: "No qualifying stop is ready yet."
+        skipMessage: "No remaining open stop is ready yet."
       };
     }
 
-    const routePosition = number(settings.routePosition, 0);
-    const currentSeq = number(pick.seq, routePosition);
+    const currentMinutesAhead = candidateMinutesAhead(pick, settings);
+    const nextMinutesAhead = nextAlternative
+      ? candidateMinutesAhead(nextAlternative, settings)
+      : null;
+    const waitMinutes = nextMinutesAhead === null
+      ? null
+      : Math.max(0, nextMinutesAhead - currentMinutesAhead);
+    const currentSeq = number(pick.seq, number(settings.routePosition, 0));
     const nextSeq = nextAlternative ? number(nextAlternative.seq, currentSeq + 1) : null;
     const segmentGap = nextSeq === null ? null : Math.max(1, nextSeq - currentSeq);
-    const minutesPerSegment = 42;
-    const waitMinutes = segmentGap === null ? null : segmentGap * minutesPerSegment;
     const scoreDifference = nextAlternative
       ? number(nextAlternative.detourScore, 0) - number(pick.detourScore, 0)
       : null;
@@ -1319,12 +1369,12 @@ It is restaurant quality filtered through trip fit.
     let label = "Options remain available";
     let skipMessage = nextAlternative
       ? `If you skip, ${nextAlternative.name} is roughly ${formatRouteMinutes(waitMinutes)} later.`
-      : "If you skip, there is no other qualifying stop in the current route window.";
+      : "If you skip, there is no other open stop in the current route results.";
 
     if (!nextAlternative) {
       level = "Sparse";
       label = "Weak stretch ahead";
-    } else if (segmentGap >= 4) {
+    } else if (waitMinutes >= 120) {
       level = "Sparse";
       label = "Long gap ahead";
     } else if (scoreDifference >= 6) {
@@ -1333,7 +1383,7 @@ It is restaurant quality filtered through trip fit.
     } else if (scoreDifference <= -6) {
       level = "Declining";
       label = "Current stop is stronger";
-    } else if (segmentGap <= 2) {
+    } else if (waitMinutes <= 45) {
       level = "Healthy";
       label = "Another option is close";
     }
@@ -1344,7 +1394,7 @@ It is restaurant quality filtered through trip fit.
           `If you skip, ${nextAlternative.name} is about ${formatRouteMinutes(waitMinutes)} later and scores ${Math.abs(scoreDifference)} points higher.`;
       } else if (scoreDifference <= -6) {
         skipMessage =
-          `If you skip, the next qualifying stop is about ${formatRouteMinutes(waitMinutes)} later and scores ${Math.abs(scoreDifference)} points lower.`;
+          `If you skip, the next open stop is about ${formatRouteMinutes(waitMinutes)} later and scores ${Math.abs(scoreDifference)} points lower.`;
       } else {
         skipMessage =
           `If you skip, ${nextAlternative.name} is about ${formatRouteMinutes(waitMinutes)} later with a similar score.`;
@@ -1352,14 +1402,14 @@ It is restaurant quality filtered through trip fit.
     }
 
     let stopMessage =
-      `Stop here and you can eat in about ${formatRouteMinutes(Math.max(8, segmentGap === null ? 18 : segmentGap * 12))}, with ${pick.estimatedAddedMinutes} minutes added to the trip.`;
+      `Stop here and you can arrive in about ${formatRouteMinutes(Math.max(1, currentMinutesAhead))}, with ${pick.estimatedAddedMinutes} minutes added to the trip.`;
 
     if (level === "Sparse" || level === "Declining") {
       stopMessage =
-        `This is the stronger decision now. The route gets weaker after this stop.`;
+        "This is the stronger decision now. The route gets weaker after this stop.";
     } else if (level === "Improving") {
       stopMessage =
-        `This is good enough now, but a stronger option exists later if you are comfortable waiting.`;
+        "This is good enough now, but a stronger option exists later if you are comfortable waiting.";
     }
 
     return {
@@ -1367,12 +1417,15 @@ It is restaurant quality filtered through trip fit.
       label,
       waitMinutes,
       segmentGap,
+      currentMinutesAhead,
+      nextMinutesAhead,
       scoreDifference,
       nextAlternativeId: nextAlternative?.id || null,
       stopMessage,
       skipMessage
     };
   }
+
 
   function formatRouteMinutes(totalMinutes) {
     const minutes = Math.max(0, Math.round(number(totalMinutes, 0)));
@@ -1393,10 +1446,13 @@ It is restaurant quality filtered through trip fit.
     routeOutlook
   ) {
     if (!pick) {
+      const afterSkip = Boolean(settings.skipIntent);
       return {
         state: "keep-driving",
         headline: "Keep driving.",
-        detail: "Nothing ahead currently clears the quality bar."
+        detail: afterSkip
+          ? "No remaining open restaurant is available in the current route results."
+          : "Nothing ahead currently clears the quality bar."
       };
     }
 
