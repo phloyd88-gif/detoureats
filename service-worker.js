@@ -1,17 +1,18 @@
-const CACHE_NAME = "detoureats-v1-8-12-restaurant-snapshot-cleanup";
+const CACHE_NAME = "detoureats-v1-9-0-review-backed-scoring";
 
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=1.8.12",
-  "./data.js?v=1.8.12",
-  "./engine.js?v=1.8.12",
-  "./place-status.js?v=1.8.12",
-  "./live-route.js?v=1.8.12",
-  "./address-search.js?v=1.8.12",
-  "./restaurant-intelligence.js?v=1.8.12",
-  "./app.js?v=1.8.12",
-  "./manifest.webmanifest?v=1.8.12",
+  "./styles.css?v=1.9.0",
+  "./data.js?v=1.9.0",
+  "./engine.js?v=1.9.0",
+  "./review-evidence.js?v=1.9.0",
+  "./place-status.js?v=1.9.0",
+  "./live-route.js?v=1.9.0",
+  "./address-search.js?v=1.9.0",
+  "./restaurant-intelligence.js?v=1.9.0",
+  "./app.js?v=1.9.0",
+  "./manifest.webmanifest?v=1.9.0",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
 ];

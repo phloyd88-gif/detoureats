@@ -3027,3 +3027,7 @@ button:disabled {
 
 
 /* v1.8.12 restaurant identity and snapshot cleanup */
+
+
+/* v1.9.0 review-backed scoring */
+.review-evidence-card,.review-evidence-note{margin-top:18px;border:1px solid rgba(25,88,57,.2);border-radius:22px;background:rgba(255,255,255,.74);padding:18px}.review-evidence-heading{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}.review-evidence-heading>div{display:grid;gap:4px}.review-evidence-heading span,.review-evidence-note span{color:var(--muted);font-size:.82rem}.review-evidence-heading strong,.review-evidence-note strong{color:var(--ink)}.review-evidence-card p{margin:12px 0 0;line-height:1.45}.review-source-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.review-source-chips a,.review-source-chips span{display:inline-flex;padding:7px 10px;border-radius:999px;background:rgba(38,117,74,.1);color:var(--green-dark);font-size:.76rem;font-weight:800;text-decoration:none}.review-evidence-note{display:grid;gap:5px}.review-evidence-unavailable{border-color:rgba(157,87,12,.25);background:rgba(255,244,226,.72)}@media(max-width:620px){.review-evidence-heading{flex-direction:column}}

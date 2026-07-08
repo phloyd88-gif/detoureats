@@ -1,4 +1,4 @@
-/* DetourEats v1.8.12 Restaurant Snapshot Cleanup
+/* DetourEats v1.9.0 Review-Backed Scoring
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -174,12 +174,21 @@ function getCandidates() {
     Final UI-layer defense: no candidate is rendered until it passes the
     provider-independent business-status filter.
   */
+  const evidenceApplied =
+    window.DetourEatsReviewEvidence
+      ?.applyCached
+      ? window.DetourEatsReviewEvidence
+          .applyCached(candidates)
+      : candidates;
+
   const validated =
     window.DetourEatsPlaceStatus
       ?.filterCandidates
       ? window.DetourEatsPlaceStatus
-          .filterCandidates(candidates)
-      : candidates;
+          .filterCandidates(
+            evidenceApplied
+          )
+      : evidenceApplied;
 
   const intelligence =
     window.DetourEatsRestaurantIntelligence;
@@ -546,6 +555,35 @@ function render() {
   updateTripAlertStatus();
   maybeDeliverExceptionalAlert(exceptionalOpportunity);
   maybeDeliverApproachAlert(pick, result);
+
+  scheduleReviewEvidence(
+    [
+      result.pick,
+      ...(result.upcoming || []),
+      ...(result.evaluated || [])
+    ].filter(Boolean)
+  );
+}
+
+function scheduleReviewEvidence(candidates) {
+  const service =
+    window.DetourEatsReviewEvidence;
+
+  if (
+    !service?.schedule ||
+    state.routingMode !== "live"
+  ) {
+    return;
+  }
+
+  service.schedule(
+    candidates,
+    () => {
+      if (state.started) {
+        render();
+      }
+    }
+  );
 }
 
 function renderDriverStatus(pick, result, trip) {
@@ -876,6 +914,47 @@ function formatEvidenceLevel(level) {
   return labels[String(level || "basic").toLowerCase()] || "Curated evidence";
 }
 
+function getReviewEvidenceLabel(pick) {
+  const evidence = pick?.reviewEvidence;
+  if (evidence?.status === "ready") {
+    return `${evidence.confidenceLabel} confidence · ${Number(evidence.totalReviewCount || 0).toLocaleString()} ratings`;
+  }
+  if (pick?.reviewEvidenceStatus === "pending") return "Checking live sources";
+  return "Provisional map estimate";
+}
+
+function renderReviewEvidenceSummary(pick) {
+  const evidence = pick?.reviewEvidence;
+  if (evidence?.status !== "ready") {
+    const status = window.DetourEatsReviewEvidence?.getProviderStatus?.();
+    if (status?.status === "not_configured") {
+      return `<div class="review-evidence-note review-evidence-unavailable"><strong>Review sources not configured</strong><span>The Food score is still provisional until server API credentials are added.</span></div>`;
+    }
+    return `<div class="review-evidence-note"><strong>Provisional Food score</strong><span>Live rating and review evidence has not been attached to this restaurant yet.</span></div>`;
+  }
+
+  const sources = (evidence.sources || []).map(source => {
+    const rating = Number.isFinite(Number(source.rating)) ? Number(source.rating).toFixed(1) : "Forum";
+    const count = Number(source.reviewCount || 0) ? ` · ${Number(source.reviewCount).toLocaleString()}` : "";
+    const label = `${String(source.provider || "").replace(/\b\w/g, letter => letter.toUpperCase())} ${rating}${count}`;
+    return source.url
+      ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`
+      : `<span>${escapeHtml(label)}</span>`;
+  }).join("");
+
+  const themes = evidence.themes?.length ? `<p><strong>Repeated food themes:</strong> ${escapeHtml(evidence.themes.join(", "))}</p>` : "";
+  const concerns = evidence.concerns?.length ? `<p><strong>Recurring concerns:</strong> ${escapeHtml(evidence.concerns.join(", "))}</p>` : "";
+
+  return `<section class="review-evidence-card">
+    <div class="review-evidence-heading">
+      <div><span>Review-backed food evidence</span><strong>${escapeHtml(String(evidence.foodScore))} Food score</strong></div>
+      <div><strong>${escapeHtml(evidence.confidenceLabel)}</strong><span>confidence</span></div>
+    </div>
+    <p>${escapeHtml(evidence.summary || "")}</p>${themes}${concerns}
+    <div class="review-source-chips">${sources}</div>
+  </section>`;
+}
+
 function renderTrustSnapshot(pick) {
   const routeMode = pick.liveRoute ? "Live route" : "Curated route";
   const provenance = getProvenanceStatus(pick);
@@ -903,6 +982,7 @@ function renderTrustSnapshot(pick) {
         <div><span>Search tier</span><strong>${escapeHtml(detourTier.label)}</strong></div>
         <div><span>Route distance</span><strong>${escapeHtml(detourTier.detail)}</strong></div>
         <div><span>Evidence</span><strong>${escapeHtml(formatEvidenceLevel(pick.destinationEvidenceLevel))}</strong></div>
+        <div><span>Review evidence</span><strong>${escapeHtml(getReviewEvidenceLabel(pick))}</strong></div>
         <div><span>Data status</span><strong>${escapeHtml(freshness)}</strong></div>
       </div>
       ${risk}
@@ -984,8 +1064,8 @@ function renderRestaurantIntelligenceDetails(pick) {
           <strong>${escapeHtml(intel.operationalStatus)} · ${escapeHtml(intel.operationalConfidence)} confidence</strong>
         </div>
         <div>
-          <span>Live review feeds</span>
-          <strong>Not connected in this beta</strong>
+          <span>Live review evidence</span>
+          <strong>${escapeHtml(intel.liveReviewStatus)}</strong>
         </div>
       </div>
 
@@ -1095,7 +1175,7 @@ function renderFieldTestPanel(result, pick) {
       </div>
       <div>
         <span>Provider status</span>
-        <strong>No live review provider connected</strong>
+        <strong>${escapeHtml(pick.reviewEvidence?.status === "ready" ? `${pick.reviewEvidence.sourceCount} review source${pick.reviewEvidence.sourceCount === 1 ? "" : "s"} · ${pick.reviewEvidence.confidenceLabel} confidence` : (window.DetourEatsReviewEvidence?.getProviderStatus?.().status || "No evidence attached"))}</strong>
       </div>
     `
     : `<p>No current recommendation.</p>`;
@@ -1344,10 +1424,11 @@ function renderDecisionCard(pick, trip, copy) {
     </div>
 
     ${renderRestaurantIntelligenceSummary(pick)}
+    ${renderReviewEvidenceSummary(pick)}
 
     <div class="score-driver-row">
       <div>
-        <span>Food</span>
+        <span>${pick.reviewEvidence?.status === "ready" ? "Food" : "Food estimate"}</span>
         <strong>${escapeHtml(String(explanation.restaurantQuality ?? "—"))}</strong>
       </div>
       <div>
@@ -1657,6 +1738,7 @@ function renderDetailsPanel(pick, trip, copy) {
     </ul>
 
     ${renderRestaurantIntelligenceDetails(pick)}
+    ${renderReviewEvidenceSummary(pick)}
 
     <div class="trust-section">
       <h3>${pick.provenance === "route-discovered" ? "Available route data" : "Verified facts"}</h3>
@@ -1664,6 +1746,7 @@ function renderDetailsPanel(pick, trip, copy) {
       <div class="trust-row"><span>Location</span><strong>${escapeHtml(pick.address || pick.city || "")}</strong></div>
       <div class="trust-row"><span>Published hours</span><strong>${escapeHtml(pick.publishedHours || "Not available")}</strong></div>
       <div class="trust-row"><span>Recommendation type</span><strong>${escapeHtml(getProvenanceStatus(pick).label)}</strong></div>
+      <div class="trust-row"><span>Food-score basis</span><strong>${escapeHtml(pick.reviewEvidence?.status === "ready" ? "Ratings, review text, recency, consistency, and available forum evidence" : "Provisional map and destination evidence")}</strong></div>
       <div class="trust-row"><span>Source</span><strong>${escapeHtml(pick.sourceType || "Curated source")}</strong></div>
       <div class="trust-row"><span>Data confidence</span><strong>${escapeHtml(pick.confidence || "Medium")}</strong></div>
       <div class="trust-row"><span>Last checked</span><strong>${escapeHtml(pick.verifiedDate || "Prototype dataset")}</strong></div>
@@ -1690,11 +1773,13 @@ function renderDetailsPanel(pick, trip, copy) {
 
     <div class="editorial-section">
       <h3>DetourEats judgment</h3>
-      <p>${pick.provenance === "route-discovered"
-        ? "Route position and detour timing use the live route. Restaurant quality is estimated conservatively from available map metadata, so the Detour Score is capped until stronger editorial evidence is available."
-        : pick.liveRoute
-          ? "Route order, distance ahead, arrival timing, decision timing, and added trip time use the current beta route calculation. Restaurant hours and Detour Score remain curated."
-          : "Route position, arrival time, and added-trip time are curated estimates in demo mode."}</p>
+      <p>${pick.reviewEvidence?.status === "ready"
+        ? "The Food score uses connected ratings, review volume, food-specific review language, consistency, recency, and any available forum discussion. Trip fit is calculated separately from the live route."
+        : pick.provenance === "route-discovered"
+          ? "Route position and detour timing use the live route. The Food score remains provisional until connected review providers return a confident identity match."
+          : pick.liveRoute
+            ? "Route order, distance ahead, arrival timing, decision timing, and added trip time use the current beta route calculation."
+            : "Route position, arrival time, and added-trip time are curated estimates in demo mode."}</p>
     </div>
     ${risk}
   `;
@@ -3633,7 +3718,7 @@ function escapeHtml(value) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.8.12", {
+      .register("service-worker.js?v=1.9.0", {
         updateViaCache: "none"
       })
       .then(registration => {

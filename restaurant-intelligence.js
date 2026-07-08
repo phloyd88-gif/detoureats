@@ -1,4 +1,4 @@
-/* DetourEats v1.8.12 restaurant intelligence
+/* DetourEats v1.9.0 review-backed restaurant intelligence
    This module uses only information already available to the prototype:
    curated restaurant records, OpenStreetMap metadata, route calculations,
    user feedback, and field-test reports.
@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "1.8.12-beta";
+  const VERSION = "1.9.0-beta";
   const FIELD_TEST_KEY = "detoureats_field_tests_v1";
   const ISSUE_REPORT_KEY = "detoureats_place_issues_v1";
   const LAST_SNAPSHOT_KEY = "detoureats_last_field_snapshot_v1";
@@ -123,7 +123,9 @@
         candidate.operationalReason ||
         "Current operation has not been independently confirmed.",
       liveReviewStatus:
-        "No licensed live review feed connected",
+        buildLiveReviewStatus(
+          candidate
+        ),
       providerStatus: getProviderStatus(),
       duplicateKey: makeDuplicateKey(candidate),
       updatedAt: Date.now()
@@ -277,7 +279,42 @@
       });
     }
 
-    return uniqueByLabel(signals).slice(0, 7);
+    const reviewEvidence =
+      candidate.reviewEvidence;
+    if (
+      reviewEvidence?.status ===
+      "ready"
+    ) {
+      for (
+        const source of
+        reviewEvidence.sources || []
+      ) {
+        if (
+          Number.isFinite(
+            Number(source.rating)
+          )
+        ) {
+          signals.push({
+            type: source.provider,
+            label:
+              `${titleCase(source.provider)} ${Number(source.rating).toFixed(1)} from ${Number(source.reviewCount || 0).toLocaleString()} ratings`
+          });
+        }
+      }
+
+      if (
+        reviewEvidence
+          .forumMentionCount
+      ) {
+        signals.push({
+          type: "forum",
+          label:
+            `${reviewEvidence.forumMentionCount} relevant forum discussion signal${reviewEvidence.forumMentionCount === 1 ? "" : "s"}`
+        });
+      }
+    }
+
+    return uniqueByLabel(signals).slice(0, 9);
   }
 
   function buildDataGaps(candidate, level, hours) {
@@ -288,12 +325,39 @@
       candidate.discoverySource === "openstreetmap";
 
     if (discovered) {
-      gaps.push(
-        "Food quality has not been independently reviewed by DetourEats."
-      );
-      gaps.push(
-        "No licensed cross-platform rating or review feed is connected."
-      );
+      if (
+        candidate.reviewEvidence
+          ?.status === "ready"
+      ) {
+        if (
+          candidate.reviewEvidence
+            .confidenceLabel !== "High"
+        ) {
+          gaps.push(
+            "Review evidence is available, but confidence remains below the high-confidence threshold."
+          );
+        }
+        const providers = new Set(
+          (
+            candidate.reviewEvidence
+              .sources || []
+          ).map(source =>
+            source.provider
+          )
+        );
+        if (!providers.has("reddit")) {
+          gaps.push(
+            "Forum evidence is not connected or did not return a confident match."
+          );
+        }
+      } else {
+        gaps.push(
+          "Food quality is still estimated from map data until live review sources return a confident match."
+        );
+        gaps.push(
+          "No live cross-platform review evidence is currently attached to this restaurant."
+        );
+      }
     }
 
     if (
@@ -372,6 +436,20 @@
       candidate.routeCalculationMethod === "matrix"
     ) {
       score -= 3;
+    }
+
+    if (
+      candidate.reviewEvidence
+        ?.status === "ready"
+    ) {
+      score += Math.round(
+        (
+          Number(
+            candidate.reviewEvidence
+              .confidenceScore || 50
+          ) - 50
+        ) * 0.25
+      );
     }
 
     return clamp(Math.round(score), 25, 98);
@@ -540,6 +618,19 @@
   }
 
   function buildWhySpecial(candidate, level) {
+    if (
+      candidate.reviewEvidence
+        ?.status === "ready" &&
+      candidate.reviewEvidence
+        .summary
+    ) {
+      return truncate(
+        candidate.reviewEvidence
+          .summary,
+        190
+      );
+    }
+
     if (candidate.evidenceSummary) {
       return String(candidate.evidenceSummary);
     }
@@ -565,6 +656,30 @@
   }
 
   function buildSourceSummary(candidate, level) {
+    if (
+      candidate.reviewEvidence
+        ?.status === "ready"
+    ) {
+      return (
+        candidate.reviewEvidence
+          .sources || []
+      )
+        .map(source => {
+          const rating =
+            Number.isFinite(
+              Number(source.rating)
+            )
+              ? ` ${Number(source.rating).toFixed(1)}`
+              : "";
+          const count =
+            Number(source.reviewCount || 0)
+              ? ` (${Number(source.reviewCount).toLocaleString()})`
+              : "";
+          return `${titleCase(source.provider)}${rating}${count}`;
+        })
+        .join(" · ");
+    }
+
     if (level.rank >= LEVELS.verified.rank) {
       return [
         candidate.sourceType || "Curated source",
@@ -582,6 +697,37 @@
         ? `${candidate.destinationEvidenceLevel} destination evidence`
         : ""
     ].filter(Boolean).join(" · ");
+  }
+
+  function buildLiveReviewStatus(candidate) {
+    const evidence =
+      candidate.reviewEvidence;
+
+    if (
+      evidence?.status === "ready"
+    ) {
+      return (
+        `Review-backed food score ${evidence.foodScore} · ` +
+        `${evidence.confidenceLabel} confidence · ` +
+        `${Number(evidence.totalReviewCount || 0).toLocaleString()} combined ratings`
+      );
+    }
+
+    if (
+      candidate.reviewEvidenceStatus ===
+      "pending"
+    ) {
+      return "Checking configured live review sources";
+    }
+
+    return "No live review evidence attached";
+  }
+
+  function titleCase(value) {
+    return String(value || "")
+      .replace(/\b\w/g, letter =>
+        letter.toUpperCase()
+      );
   }
 
   function assessHours(candidate) {

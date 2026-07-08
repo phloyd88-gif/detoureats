@@ -1,4 +1,4 @@
-/* DetourEats v1.8.12 restaurant identity and snapshot cleanup */
+/* DetourEats v1.9.0 review-backed status validation */
 (function () {
   "use strict";
 
@@ -87,6 +87,32 @@
   }
 
   function assessCandidate(candidate) {
+    if (
+      candidate?.reviewEvidence
+        ?.businessClosed === true
+    ) {
+      return {
+        blocked: true,
+        status: "closed",
+        confidence: "confirmed",
+        reasonCode:
+          "review-provider-closed",
+        reason:
+          candidate.reviewEvidence
+            .closureReason ||
+          "A connected review provider reports this business permanently closed.",
+        lastCheckedAt:
+          candidate.reviewEvidence
+            .checkedAt || "",
+        ageDays: 0,
+        signalCount:
+          Number(
+            candidate.reviewEvidence
+              .sourceCount || 1
+          )
+      };
+    }
+
     const normalized = {
       id:
         String(candidate?.id || ""),

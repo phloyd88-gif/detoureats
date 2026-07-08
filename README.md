@@ -1,4 +1,4 @@
-# DetourEats App v1.8.12 Restaurant Snapshot Cleanup
+# DetourEats App v1.9.0 Review-Backed Scoring
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -880,3 +880,19 @@ This release:
 - Documents that the internal `balanced` value is the visible
   `Eating priority: Best overall` option.
 - Invalidates the previous restaurant discovery cache.
+
+
+## v1.9.0: Review-Backed Scoring
+
+- Adds a Vercel serverless restaurant-evidence API.
+- Connects Google Places ratings, rating volume, review text, recency, business status, and source identity.
+- Connects Yelp ratings and review volume, plus review excerpts when the account plan permits them.
+- Includes an optional Reddit forum adapter that remains disabled until approved credentials are configured.
+- Uses Bayesian rating adjustment so a small perfect rating does not automatically outrank an established restaurant.
+- Extracts food-specific sentiment, recurring food themes, concerns, consistency, recency, and forum signals.
+- Uses the review-backed Food score directly when identity matching succeeds.
+- Labels map-only scores as provisional Food estimates.
+- Sends provider-confirmed permanent closures through the existing closure filter.
+- Caches normalized evidence in the browser for seven days.
+
+See `API_SETUP.md` before adding credentials.

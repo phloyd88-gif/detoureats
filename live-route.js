@@ -13,7 +13,7 @@
   "use strict";
 
   const GEOCODE_CACHE_KEY = "detoureats_geocode_cache_v2";
-  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v8";
+  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v9";
 
   const NOMINATIM_URL =
     "https://nominatim.openstreetmap.org/search";

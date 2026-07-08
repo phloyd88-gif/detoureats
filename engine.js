@@ -1,4 +1,4 @@
-/* DetourEats v1.8.3 Operationally Verified Scoring Engine
+/* DetourEats v1.9.0 Review-Backed Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -353,13 +353,30 @@ It is restaurant quality filtered through trip fit.
   function scoreCandidate(c, settings, allCandidates) {
     const maxAdded = number(settings.maxAdded ?? settings.maxAddedMinutes, 10);
 
-    const restaurantQuality = clamp(
+    const reviewBacked =
+      c.reviewEvidence?.status ===
+        "ready" &&
+      Number.isFinite(
+        Number(
+          c.reviewEvidence.foodScore
+        )
+      );
+
+    const provisionalQuality = clamp(
       c.foodReputation * 0.38 +
       c.destinationWorthiness * 0.24 +
       c.uniqueness * 0.18 +
       c.consistency * 0.12 +
       c.reviewConfidence * 0.08
     );
+
+    const restaurantQuality =
+      reviewBacked
+        ? clamp(
+            c.reviewEvidence
+              .foodScore
+          )
+        : provisionalQuality;
 
     const timeFit = scoreAddedTime(c.estimatedAddedMinutes, maxAdded);
     const openFit =
@@ -464,26 +481,44 @@ It is restaurant quality filtered through trip fit.
       c.provenance === "route-discovered" ||
       c.discoverySource === "openstreetmap"
     ) {
-      let discoveryCap =
-        c.discoveryConfidence === "medium" ? 86 : 81;
+      let discoveryCap;
 
-      if (
-        c.destinationEvidenceLevel === "strong" &&
-        c.detourTier === "extended"
-      ) {
-        discoveryCap = style.includes("hungry") ? 82 : 88;
-      }
-
-      if (
-        c.destinationEvidenceLevel === "strong" &&
-        c.detourTier === "destination"
-      ) {
+      if (reviewBacked) {
+        const evidenceConfidence =
+          Number(
+            c.reviewEvidence
+              ?.confidenceScore || 0
+          );
         discoveryCap =
-          style.includes("adventure") ||
-          style.includes("food") ||
-          style.includes("strict")
-            ? 90
-            : 86;
+          evidenceConfidence >= 88
+            ? 94
+            : evidenceConfidence >= 68
+              ? 90
+              : 85;
+      } else {
+        discoveryCap =
+          c.discoveryConfidence === "medium"
+            ? 86
+            : 81;
+
+        if (
+          c.destinationEvidenceLevel === "strong" &&
+          c.detourTier === "extended"
+        ) {
+          discoveryCap = style.includes("hungry") ? 82 : 88;
+        }
+
+        if (
+          c.destinationEvidenceLevel === "strong" &&
+          c.detourTier === "destination"
+        ) {
+          discoveryCap =
+            style.includes("adventure") ||
+            style.includes("food") ||
+            style.includes("strict")
+              ? 90
+              : 86;
+        }
       }
 
       detourScore = Math.min(detourScore, discoveryCap);
@@ -520,7 +555,8 @@ It is restaurant quality filtered through trip fit.
       detourScore,
       tier,
       maxAdded,
-      detourGate
+      detourGate,
+      reviewBacked
     });
 
     return {
@@ -1130,7 +1166,27 @@ It is restaurant quality filtered through trip fit.
       c.provenance === "route-discovered" ||
       c.discoverySource === "openstreetmap"
     ) {
-      bullets.push("Route-discovered option with incomplete editorial quality data.");
+      if (s.reviewBacked) {
+        const evidence =
+          c.reviewEvidence;
+        bullets.push(
+          `Food score uses ${Number(evidence.totalReviewCount || 0).toLocaleString()} combined rating submissions from ${Number(evidence.sourceCount || 0)} connected source${Number(evidence.sourceCount || 0) === 1 ? "" : "s"}.`
+        );
+        if (evidence.themes?.length) {
+          bullets.push(
+            `Repeated food themes: ${evidence.themes.join(", ")}.`
+          );
+        }
+        if (evidence.forumMentionCount) {
+          bullets.push(
+            `${evidence.forumMentionCount} relevant forum discussion signal${evidence.forumMentionCount === 1 ? "" : "s"} contributed to the evidence profile.`
+          );
+        }
+      } else {
+        bullets.push(
+          "Route-discovered option with provisional food quality estimated from map metadata."
+        );
+      }
       if (
         c.operationalConfidence === "low"
       ) {
@@ -1178,7 +1234,7 @@ It is restaurant quality filtered through trip fit.
     if (s.scarcityFit >= 88) bullets.push("No clearly better option is coming up soon.");
     if (s.style.includes("hungry")) bullets.push("Hungry Soon mode favors an earlier acceptable stop.");
     else if (s.style.includes("adventure") || s.style.includes("food")) bullets.push("Food Adventure mode is willing to wait for a stronger destination stop.");
-    else bullets.push("Balanced mode weighs food quality and trip cost together.");
+    else bullets.push("Best overall weighs food quality and trip cost together.");
     (s.preferenceReasons || []).forEach(reason => bullets.push(reason));
     if (c.famousFor) bullets.push(`Known for: ${c.famousFor}.`);
 

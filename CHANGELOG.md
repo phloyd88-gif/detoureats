@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.9.0 Review-Backed Scoring
+- Added a Vercel serverless restaurant-evidence API.
+- Added Google Places rating, review, recency, and business-status evidence.
+- Added Yelp rating and review-count evidence with optional excerpt support.
+- Added an optional Reddit OAuth forum adapter that stays disabled until approved credentials are configured.
+- Added Bayesian rating adjustment, food-specific sentiment, consistency, recency, and forum components.
+- Uses review-backed Food scores directly when a confident provider match succeeds.
+- Labels map-only scores as provisional estimates.
+- Added source links, confidence, themes, concerns, and component transparency.
+- Provider-confirmed permanent closures now enter the business-status filter.
+- Added a seven-day browser evidence cache and reset the route discovery cache.
+
+
 ## v1.8.12 Restaurant Snapshot Cleanup
 - Corrected `Dair Circus` to `Dairy Circus` across all candidate paths.
 - Replaced raw company descriptions with concise structured restaurant snapshots.
