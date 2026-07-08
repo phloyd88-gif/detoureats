@@ -1,4 +1,4 @@
-/* DetourEats v1.9.0 Review-Backed Scoring
+/* DetourEats v1.9.3 Review-Backed Scoring
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -101,6 +101,7 @@ const els = {
   resetNavigationPreferenceButton: document.getElementById("resetNavigationPreferenceButton"),
   priorityChips: Array.from(document.querySelectorAll("[data-priority]")),
   skipReasonPanel: document.getElementById("skipReasonPanel"),
+  skipReasonBackdrop: document.getElementById("skipReasonBackdrop"),
   closeSkipPanelButton: document.getElementById("closeSkipPanelButton"),
   toast: document.getElementById("toast")
 };
@@ -140,6 +141,8 @@ let state = {
   excludedCategories: new Set(),
   deferUntilSeq: 0,
   minimumScore: 0,
+  skipIntent: null,
+  selectedCandidateId: "",
   lastSkipAdjustment: "",
   currentTime: 480,
   routePosition: 0,
@@ -229,6 +232,8 @@ function getEngineResult() {
     excludedCategories: Array.from(state.excludedCategories),
     deferUntilSeq: state.deferUntilSeq,
     minimumScore: state.minimumScore,
+    skipIntent: state.skipIntent,
+    preferredCandidateId: state.selectedCandidateId,
     skippedIds: Array.from(state.skippedIds),
     travelDay: "saturday",
     corridor: "All",
@@ -388,6 +393,7 @@ function getTripState(pick, result) {
       "stop-now": "Stop Now",
       "eat-soon": "Eat Soon",
       "keep-driving": "Keep Driving",
+      "verify-hours": "Verify Hours",
       "good-stop": "Found Something"
     };
 
@@ -396,7 +402,7 @@ function getTripState(pick, result) {
       label: labels[d.state] || "Found Something",
       headline: d.headline,
       subline: d.detail,
-      badgeClass: d.state === "stop-now" ? "strong" : d.state === "keep-driving" ? "wait" : "practical"
+      badgeClass: d.state === "stop-now" ? "strong" : ["keep-driving", "verify-hours"].includes(d.state) ? "wait" : "practical"
     };
   }
 
@@ -482,7 +488,9 @@ function getRecommendationCopy(pick, tripState) {
   }
 
   if (pick.open === false) {
-    rationale.unshift("Warning: this may not be open at your estimated arrival.");
+    rationale.unshift("This restaurant appears closed at your estimated arrival.");
+  } else if (pick.open === null) {
+    rationale.unshift("Verify the restaurant's hours before leaving the route.");
   }
 
   return {
@@ -605,7 +613,7 @@ function renderDriverStatus(pick, result, trip) {
       .sort((a, b) => Number(a.minutesAhead ?? 999) - Number(b.minutesAhead ?? 999));
 
     const nextStrong = evaluated.find(candidate =>
-      candidate.open !== false && candidate.score >= 86
+      candidate.open === true && candidate.score >= 86
     );
 
     els.nextFoodZoneText.textContent = nextStrong
@@ -680,6 +688,24 @@ function estimateMinutesAhead(pick) {
 }
 
 function getDecisionTiming(pick) {
+  const openState = pick?.open === true || pick?.open === false
+    ? pick.open
+    : (pick?.openAtArrival ?? null);
+
+  if (openState === false) {
+    return {
+      label: "Do not stop",
+      detail: "This restaurant appears closed at your estimated arrival."
+    };
+  }
+
+  if (openState === null) {
+    return {
+      label: "Verify hours first",
+      detail: "Confirm the restaurant is open before leaving the main route."
+    };
+  }
+
   if (pick?.liveRoute && Number.isFinite(Number(pick.decisionMinutes))) {
     const minutes = Math.max(0, Number(pick.decisionMinutes));
     return {
@@ -763,6 +789,7 @@ function eatSooner() {
   state.tripMode = "hungry";
   state.stopType = "either";
   state.minimumScore = 0;
+  state.skipIntent = null;
   state.deferUntilSeq = Number(state.routePosition);
   state.lastSkipAdjustment = "Eating priority changed to Eat soon.";
 
@@ -781,6 +808,7 @@ function setEatingPriority(priority) {
 
   state.tripMode = priority;
   state.minimumScore = 0;
+  state.skipIntent = null;
 
   if (priority === "hungry") {
     state.deferUntilSeq = Number(state.routePosition);
@@ -897,9 +925,10 @@ function getProvenanceStatus(pick) {
 }
 
 function getHoursStatus(pick) {
-  if (pick.open === true) return "Open at arrival";
-  if (pick.open === false) return "Closed at arrival";
-  if (pick.publishedHours && pick.publishedHours !== "Not listed in OpenStreetMap") {
+  if (pick?.open === true) return "Open at arrival";
+  if (pick?.open === false) return "Closed at arrival";
+  if (pick?.intelligence?.hours?.label) return pick.intelligence.hours.label;
+  if (pick?.publishedHours && pick.publishedHours !== "Not listed in OpenStreetMap") {
     return "Hours listed, arrival not verified";
   }
   return "Hours not verified";
@@ -914,13 +943,92 @@ function formatEvidenceLevel(level) {
   return labels[String(level || "basic").toLowerCase()] || "Curated evidence";
 }
 
+function formatNaturalList(items) {
+  const clean = (items || []).filter(Boolean);
+  if (!clean.length) return "";
+  if (clean.length === 1) return clean[0];
+  if (clean.length === 2) return `${clean[0]} and ${clean[1]}`;
+  return `${clean.slice(0, -1).join(", ")}, and ${clean[clean.length - 1]}`;
+}
+
+function formatProviderName(value) {
+  return String(value || "").replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function humanizeReviewTheme(value) {
+  const labels = {
+    pizza: "pizza", crust: "pizza crust", coffee: "coffee", espresso: "espresso",
+    breakfast: "breakfast", sandwich: "sandwiches", burger: "burgers", pasta: "pasta",
+    steak: "steak", chicken: "chicken", taco: "tacos", sushi: "sushi",
+    dessert: "desserts", cookie: "cookies", bakery: "baked goods", fresh: "fresh food",
+    homemade: "homemade food", portion: "portion sizes"
+  };
+  return labels[String(value || "").toLowerCase()] || String(value || "").toLowerCase();
+}
+
+function humanizeReviewConcern(value) {
+  const labels = {
+    bland: "bland food", cold: "food arriving cold", stale: "stale food", dry: "dry food",
+    undercooked: "undercooked food", overcooked: "overcooked food", burnt: "burnt food",
+    soggy: "soggy food", inconsistent: "inconsistent quality", greasy: "greasy food",
+    "small portion": "small portions"
+  };
+  return labels[String(value || "").toLowerCase()] || String(value || "").toLowerCase();
+}
+
+function getRatingEvidenceText(evidence) {
+  const sources = (evidence?.sources || [])
+    .filter(source => Number.isFinite(Number(source.rating)) && Number(source.reviewCount || 0) > 0);
+  const total = Number(evidence?.totalReviewCount || 0);
+  if (!sources.length || !total) return "Review ratings available";
+  if (sources.length === 1) {
+    const provider = formatProviderName(sources[0].provider);
+    return `${total.toLocaleString()} ${provider} rating${total === 1 ? "" : "s"}`;
+  }
+  return `${total.toLocaleString()} ratings across ${formatNaturalList(sources.map(source => formatProviderName(source.provider)))}`;
+}
+
 function getReviewEvidenceLabel(pick) {
   const evidence = pick?.reviewEvidence;
   if (evidence?.status === "ready") {
-    return `${evidence.confidenceLabel} confidence · ${Number(evidence.totalReviewCount || 0).toLocaleString()} ratings`;
+    return `${evidence.confidenceLabel} confidence · ${getRatingEvidenceText(evidence)}`;
   }
   if (pick?.reviewEvidenceStatus === "pending") return "Checking live sources";
   return "Provisional map estimate";
+}
+
+function buildReviewEvidenceNarrative(evidence) {
+  const sentences = [];
+  const sources = (evidence?.sources || [])
+    .filter(source => Number.isFinite(Number(source.rating)) && Number(source.reviewCount || 0) > 0);
+
+  if (sources.length === 1) {
+    const source = sources[0];
+    sentences.push(
+      `${formatProviderName(source.provider)} ${Number(source.rating).toFixed(1)} from ${Number(source.reviewCount).toLocaleString()} rating${Number(source.reviewCount) === 1 ? "" : "s"}.`
+    );
+  } else if (sources.length > 1) {
+    const sourceRatings = sources.map(source =>
+      `${formatProviderName(source.provider)} ${Number(source.rating).toFixed(1)}`
+    );
+    sentences.push(`${formatNaturalList(sourceRatings)} across ${getRatingEvidenceText(evidence)}.`);
+  }
+
+  if (evidence?.themes?.length) {
+    const positive = Number(evidence?.components?.positiveFoodSignals || 0) >
+      Number(evidence?.components?.negativeFoodSignals || 0);
+    sentences.push(
+      `${positive ? "Repeated praise for" : "Reviews repeatedly mention"} ${formatNaturalList(evidence.themes.map(humanizeReviewTheme))}.`
+    );
+  }
+
+  if (evidence?.concerns?.length) {
+    sentences.push(
+      `Some reviews mention ${formatNaturalList(evidence.concerns.map(humanizeReviewConcern))}.`
+    );
+  }
+
+  return sentences.join(" ") || "Live rating evidence is attached to this restaurant.";
 }
 
 function renderReviewEvidenceSummary(pick) {
@@ -935,22 +1043,20 @@ function renderReviewEvidenceSummary(pick) {
 
   const sources = (evidence.sources || []).map(source => {
     const rating = Number.isFinite(Number(source.rating)) ? Number(source.rating).toFixed(1) : "Forum";
-    const count = Number(source.reviewCount || 0) ? ` · ${Number(source.reviewCount).toLocaleString()}` : "";
-    const label = `${String(source.provider || "").replace(/\b\w/g, letter => letter.toUpperCase())} ${rating}${count}`;
+    const countNumber = Number(source.reviewCount || 0);
+    const count = countNumber ? ` · ${countNumber.toLocaleString()} rating${countNumber === 1 ? "" : "s"}` : "";
+    const label = `${formatProviderName(source.provider)} ${rating}${count}`;
     return source.url
       ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`
       : `<span>${escapeHtml(label)}</span>`;
   }).join("");
 
-  const themes = evidence.themes?.length ? `<p><strong>Repeated food themes:</strong> ${escapeHtml(evidence.themes.join(", "))}</p>` : "";
-  const concerns = evidence.concerns?.length ? `<p><strong>Recurring concerns:</strong> ${escapeHtml(evidence.concerns.join(", "))}</p>` : "";
-
-  return `<section class="review-evidence-card">
+  return `<section class="review-evidence-card review-evidence-card-compact">
     <div class="review-evidence-heading">
       <div><span>Review-backed food evidence</span><strong>${escapeHtml(String(evidence.foodScore))} Food score</strong></div>
       <div><strong>${escapeHtml(evidence.confidenceLabel)}</strong><span>confidence</span></div>
     </div>
-    <p>${escapeHtml(evidence.summary || "")}</p>${themes}${concerns}
+    <p class="review-evidence-narrative">${escapeHtml(buildReviewEvidenceNarrative(evidence))}</p>
     <div class="review-source-chips">${sources}</div>
   </section>`;
 }
@@ -998,15 +1104,19 @@ function renderRestaurantIntelligenceSummary(pick) {
     ? `${intel.dataGaps.length} known data gap${intel.dataGaps.length === 1 ? "" : "s"}`
     : "No major data gaps recorded";
 
+  const description = pick?.reviewEvidence?.status === "ready"
+    ? ""
+    : `<p>${escapeHtml(intel.whySpecial)}</p>`;
+
   return `
-    <section class="restaurant-intelligence-summary">
+    <section class="restaurant-intelligence-summary ${pick?.reviewEvidence?.status === "ready" ? "restaurant-intelligence-summary-compact" : ""}">
       <div class="restaurant-intelligence-heading">
         <div class="intelligence-level ${escapeHtml(intel.level.className)}">
           ${escapeHtml(intel.level.label)}
         </div>
         <strong>${escapeHtml(intel.confidenceLabel)} intelligence confidence</strong>
       </div>
-      <p>${escapeHtml(intel.whySpecial)}</p>
+      ${description}
       <div class="intelligence-summary-meta">
         <span>${escapeHtml(intel.hours.label)}</span>
         <span>${escapeHtml(gaps)}</span>
@@ -1384,6 +1494,7 @@ function renderDecisionCard(pick, trip, copy) {
   }
 
   const tier = getRecommendationTier(pick);
+  const primaryBadge = trip.key === "verify-hours" ? trip.label : tier;
   const openLabel = getHoursStatus(pick);
   const confidence = getConfidenceStatus(pick);
   const provenance = getProvenanceStatus(pick);
@@ -1398,7 +1509,7 @@ function renderDecisionCard(pick, trip, copy) {
 
   els.decisionCard.innerHTML = `
     <div class="decision-card-top">
-      <div class="badge ${trip.badgeClass}">${escapeHtml(tier)}</div>
+      <div class="badge ${trip.badgeClass}">${escapeHtml(primaryBadge)}</div>
       <div class="card-status-chips">
         <div class="provenance-chip ${provenance.className}">${escapeHtml(provenance.label)}</div>
         <div class="detour-tier-chip ${detourTier.className}">${escapeHtml(detourTier.label)}</div>
@@ -1420,6 +1531,12 @@ function renderDecisionCard(pick, trip, copy) {
         <div class="score-comparison ${comparison.className}">
           ${escapeHtml(comparison.text)}
         </div>
+        ${state.currentResult?.preferenceOutcome ? `
+          <div class="preference-outcome ${state.currentResult.preferenceOutcome.matched ? "matched" : "fallback"}">
+            <strong>${escapeHtml(state.currentResult.preferenceOutcome.label)}</strong>
+            <span>${escapeHtml(state.currentResult.preferenceOutcome.message)}</span>
+          </div>
+        ` : ""}
       </div>
     </div>
 
@@ -1576,7 +1693,13 @@ function renderTripTimeline(pick, result) {
         : "backup-zone";
 
     return `
-      <article class="timeline-stop ${zoneClass} ${pick?.id === candidate.id ? "current" : ""}">
+      <article
+        class="timeline-stop ${zoneClass} ${pick?.id === candidate.id ? "current" : ""}"
+        data-road-ahead-id="${escapeHtml(candidate.id)}"
+        role="button"
+        tabindex="0"
+        aria-label="Choose ${escapeHtml(candidate.name)} as your stop"
+      >
         <div class="timeline-line">
           <span class="timeline-dot"></span>
         </div>
@@ -1607,6 +1730,7 @@ function renderTripTimeline(pick, result) {
           <div class="timeline-meta">
             <span>${escapeHtml(timing)}</span>
             <span>Adds ${candidate.added} min</span>
+            <span class="timeline-choose">${pick?.id === candidate.id ? "Selected" : "Choose stop"}</span>
           </div>
           ${gap ? `<small>${escapeHtml(gap)}</small>` : ""}
         </div>
@@ -2578,6 +2702,8 @@ async function startTrip() {
   state.excludedCategories = new Set();
   state.deferUntilSeq = 0;
   state.minimumScore = 0;
+  state.skipIntent = null;
+  state.selectedCandidateId = "";
   state.lastSkipAdjustment = "";
   state.detailsOpen = false;
   state.currentTime = getActualCurrentMinutes();
@@ -2671,6 +2797,7 @@ function getActualCurrentMinutes() {
 }
 
 function goBack() {
+  closeSkipPanel();
   stopLocationWatch();
   state.started = false;
   state.routingMode = "idle";
@@ -2683,60 +2810,149 @@ function goBack() {
 }
 
 function skipPick() {
-  if (!state.currentPick) return;
-  els.skipReasonPanel?.classList.toggle("hidden");
+  if (!state.currentPick || !els.skipReasonPanel) return;
+
+  const isOpening = els.skipReasonPanel.classList.contains("hidden");
+  if (!isOpening) {
+    closeSkipPanel();
+    return;
+  }
+
+  els.skipReasonPanel.classList.remove("hidden");
+  els.skipReasonBackdrop?.classList.remove("hidden");
+  document.body.classList.add("skip-panel-open");
+
+  requestAnimationFrame(() => {
+    els.skipReasonPanel
+      ?.querySelector("[data-skip-reason]")
+      ?.focus({ preventScroll: true });
+  });
 }
 
 function closeSkipPanel() {
+  const wasOpen = Boolean(
+    els.skipReasonPanel &&
+    !els.skipReasonPanel.classList.contains("hidden")
+  );
   els.skipReasonPanel?.classList.add("hidden");
+  els.skipReasonBackdrop?.classList.add("hidden");
+  document.body.classList.remove("skip-panel-open");
+  if (wasOpen) els.skipButton?.focus({ preventScroll: true });
+}
+
+function selectRoadAheadStop(candidateId) {
+  const id = String(candidateId || "");
+  if (!id) return;
+
+  const candidates = [
+    ...(state.currentResult?.evaluated || []),
+    ...(state.currentResult?.upcoming || [])
+  ].map(normalizePick).filter(Boolean);
+  const chosen = candidates.find(candidate => String(candidate.id) === id);
+
+  if (!chosen || chosen.open === false || state.skippedIds.has(id)) {
+    showToast("Stop unavailable", "That option can no longer be selected.");
+    return;
+  }
+
+  state.selectedCandidateId = id;
+  state.skipIntent = null;
+  state.detailsOpen = false;
+  closeSkipPanel();
+  render();
+  showToast("Stop selected", `${chosen.name} is now your active choice.`);
+
+  requestAnimationFrame(() => {
+    els.decisionCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 }
 
 function applySkipReason(reason) {
   const pick = state.currentPick;
   if (!pick) return;
 
+  const referenceAdded = Math.max(0, Number(pick.added || 0));
+  const referenceMinutesAhead = Math.max(0, estimateMinutesAhead(pick));
+  const referencePriceLevel = String(pick.priceLevel || "");
+  const referenceCategory = String(pick.cuisine || pick.category || "").trim();
+
   state.skippedIds.add(pick.id);
+  state.skipIntent = null;
+  if (state.selectedCandidateId === pick.id) {
+    state.selectedCandidateId = "";
+  }
+
+  const makeIntent = extra => ({
+    reason,
+    referenceId: String(pick.id),
+    referenceName: String(pick.name || "the skipped stop"),
+    referenceAddedMinutes: referenceAdded,
+    referenceMinutesAhead,
+    referenceScore: Number(pick.score || 0),
+    referencePriceLevel,
+    referenceCategory,
+    ...extra
+  });
 
   switch (reason) {
-    case "too-far":
-      state.maxAdded = Math.max(5, Math.min(state.maxAdded, pick.added - 1, state.maxAdded - 5));
-      state.lastSkipAdjustment = `Maximum detour tightened to ${state.maxAdded} minutes.`;
-      showToast("Detour tightened", state.lastSkipAdjustment);
+    case "too-far": {
+      const tighterLimit = Math.max(3, Math.floor(referenceAdded - 1));
+      state.maxAdded = Math.min(state.maxAdded, tighterLimit);
+      state.skipIntent = makeIntent({ targetAddedMinutes: tighterLimit });
+      state.lastSkipAdjustment = `Looking for a stop that adds less than ${Math.max(1, Math.round(referenceAdded))} minutes.`;
+      if (els.maxAddedInput) els.maxAddedInput.value = String(state.maxAdded);
+      showToast("Looking for a closer detour", "The next result must add less trip time when one is available.");
       break;
+    }
 
     case "not-hungry":
       state.deferUntilSeq = Math.max(state.deferUntilSeq, Number(pick.seq || state.routePosition) + 2);
-      state.lastSkipAdjustment = "Recommendations pushed farther down the route.";
-      showToast("We’ll wait", state.lastSkipAdjustment);
+      state.skipIntent = makeIntent({ minimumLaterMinutes: 10 });
+      state.lastSkipAdjustment = "Recommendations moved farther down the route.";
+      showToast("We’ll wait", "The next result will be later on the route, not just a different nearby stop.");
       break;
 
     case "wrong-cuisine": {
-      const cuisine = String(pick.category || "").trim();
-      if (cuisine) state.excludedCategories.add(cuisine.toLowerCase());
+      const cuisine = referenceCategory;
+      state.skipIntent = makeIntent({ excludedCategory: cuisine });
       state.lastSkipAdjustment = cuisine
-        ? `${cuisine} excluded for the rest of this trip.`
-        : "That cuisine was excluded for this trip.";
-      showToast("Cuisine adjusted", state.lastSkipAdjustment);
+        ? `Now prioritizing a different cuisine than ${cuisine}.`
+        : "Now prioritizing a clearly different food option.";
+      showToast("Looking for a different cuisine", "The app will switch cuisines when one is available and label any fallback.");
       break;
     }
 
     case "too-expensive":
       state.pricePreference = "budget";
-      state.lastSkipAdjustment = "Now prioritizing inexpensive stops.";
-      showToast("Budget mode applied", state.lastSkipAdjustment);
+      state.skipIntent = makeIntent({ preferCheaper: true });
+      state.lastSkipAdjustment = "Now prioritizing a less expensive stop without hiding every alternative.";
+      if (els.pricePreferenceInput) els.pricePreferenceInput.value = "budget";
+      showToast("Looking for a cheaper stop", "The app will prefer a lower price tier and clearly label any fallback.");
       break;
 
     case "need-faster":
-      state.stopType = "quick";
-      state.maxAdded = Math.min(state.maxAdded, 10);
-      state.lastSkipAdjustment = "Now prioritizing quick stops within 10 minutes.";
-      showToast("Faster stops only", state.lastSkipAdjustment);
+      state.deferUntilSeq = Number(state.routePosition);
+      state.tripMode = "hungry";
+      state.stopType = "either";
+      state.maxAdded = Math.min(state.maxAdded, Math.max(5, Math.floor(referenceAdded || state.maxAdded)));
+      state.skipIntent = makeIntent({ requireSooner: true, requireLowerDetour: true });
+      state.lastSkipAdjustment = "Looking for a stop that is sooner and adds less trip time.";
+      if (els.tripModeInput) els.tripModeInput.value = "hungry";
+      if (els.stopTypeInput) els.stopTypeInput.value = "either";
+      if (els.maxAddedInput) els.maxAddedInput.value = String(state.maxAdded);
+      showToast("Looking for a genuinely faster stop", "A farther-away result will not be presented as faster.");
       break;
 
     case "show-better":
       state.minimumScore = Math.min(99, Math.max(state.minimumScore, Number(pick.score || 0) + 3));
-      state.lastSkipAdjustment = `Next stop must score at least ${state.minimumScore}.`;
-      showToast("Quality bar raised", state.lastSkipAdjustment);
+      state.skipIntent = makeIntent({ targetScore: state.minimumScore });
+      state.lastSkipAdjustment = `Looking for a stop scoring ${state.minimumScore} or better, with a clearly labeled fallback if none exists.`;
+      showToast("Looking for something better", "We’ll prefer a stronger stop without hiding every other option.");
+      break;
+
+    case "other":
+      state.lastSkipAdjustment = "That stop was removed without changing your trip preferences.";
+      showToast("Skipped", "We’ll show the next best available option.");
       break;
 
     default:
@@ -3718,7 +3934,7 @@ function escapeHtml(value) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.9.0", {
+      .register("service-worker.js?v=1.9.3", {
         updateViaCache: "none"
       })
       .then(registration => {
@@ -3818,6 +4034,23 @@ els.destinationInput.addEventListener("input", () => {
 els.backButton.addEventListener("click", goBack);
 els.skipButton.addEventListener("click", skipPick);
 els.closeSkipPanelButton?.addEventListener("click", closeSkipPanel);
+els.skipReasonBackdrop?.addEventListener("click", closeSkipPanel);
+els.tripTimeline?.addEventListener("click", event => {
+  const stop = event.target.closest("[data-road-ahead-id]");
+  if (stop) selectRoadAheadStop(stop.dataset.roadAheadId);
+});
+els.tripTimeline?.addEventListener("keydown", event => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const stop = event.target.closest("[data-road-ahead-id]");
+  if (!stop) return;
+  event.preventDefault();
+  selectRoadAheadStop(stop.dataset.roadAheadId);
+});
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !els.skipReasonPanel?.classList.contains("hidden")) {
+    closeSkipPanel();
+  }
+});
 document.querySelectorAll("[data-skip-reason]").forEach(button => {
   button.addEventListener("click", () => applySkipReason(button.dataset.skipReason));
 });

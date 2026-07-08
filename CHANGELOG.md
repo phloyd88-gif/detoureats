@@ -1,4 +1,37 @@
+# DetourEats Changelog
+
+## v1.9.3 Preference Integrity
+
+- Added a semantic validation layer for every skip reason so the replacement recommendation matches the reason selected.
+- **Need something faster** now requires an option that is no farther away and improves arrival or detour time before labeling it faster.
+- When no genuinely faster option exists, the earliest remaining restaurant is shown with an explicit **No truly faster alternative** fallback notice.
+- **Too far** prioritizes a restaurant with less added trip time and labels the fallback when none is shorter.
+- **Not hungry yet** prioritizes a meaningfully later stop but falls back instead of returning no results when the route window is sparse.
+- **Too expensive** is now a soft lower-price preference rather than a hard filter that can empty the result set.
+- **Wrong cuisine** prioritizes a genuinely different cuisine without broadly filtering generic restaurant categories.
+- **Wait for something better** continues to use a soft score target and now visibly confirms whether the target was met.
+- Added a result banner to distinguish a matched preference from a best-available fallback.
+- Reset browser and service-worker asset versions to v1.9.3.
+
+## v1.9.2 Skip Flow and Road-Ahead Selection
+
+- Added a neutral **Other** skip reason that removes only the current stop without changing trip preferences.
+- Changed **Wait for something better** from a hard score gate to a soft preference. If no stronger stop qualifies, DetourEats now shows the best available option instead of returning no results.
+- Made every restaurant in **Road Ahead** selectable by click, tap, Enter, or Space. Selecting one promotes it to the active recommendation and updates the decision logic.
+- Converted the skip-reason UI into a fixed bottom sheet with a backdrop so it opens in the current viewport without requiring scrolling.
+- Added click-outside and Escape-key dismissal for the skip sheet.
+- Reset browser and service-worker asset versions to v1.9.2.
+
 # Changelog
+
+## v1.9.1 Decision and Evidence Cleanup
+- Closed-at-arrival restaurants are now excluded from recommendations, including closures inferred from published schedules.
+- Provider-confirmed temporary or permanent closures now suppress the candidate.
+- Unknown arrival hours cap the Detour Score and change the decision prompt to **Verify hours first**.
+- Removed the duplicated review-evidence paragraph from the intelligence summary.
+- Replaced generic combined-submission wording with source-specific rating counts.
+- Added natural-language review themes and concerns.
+- Compacted the main evidence panels and reset browser caches.
 
 ## v1.9.0 Review-Backed Scoring
 - Added a Vercel serverless restaurant-evidence API.

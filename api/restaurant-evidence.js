@@ -1,4 +1,4 @@
-/* DetourEats v1.9.0 review-backed evidence API */
+/* DetourEats v1.9.3 review-backed evidence API */
 const MAX_CANDIDATES = 5;
 const TIMEOUT_MS = 7500;
 let redditToken = { value: "", expiresAt: 0 };
@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
     const configured = configuredProviders();
     if (!configured.length) {
       return end(res, 200, {
-        version: "1.9.0",
+        version: "1.9.3",
         status: "not_configured",
         configuredProviders: [],
         results: candidates.map(c => ({ key: c.key, status: "not_configured" }))
@@ -29,7 +29,7 @@ module.exports = async function handler(req, res) {
 
     const results = [];
     for (const candidate of candidates) results.push(await evidenceFor(candidate, configured));
-    return end(res, 200, { version: "1.9.0", status: "ok", configuredProviders: configured, results });
+    return end(res, 200, { version: "1.9.3", status: "ok", configuredProviders: configured, results });
   } catch (error) {
     console.error("restaurant-evidence", error);
     return end(res, 500, { error: "evidence_failed", message: "Live restaurant evidence could not be loaded." });
@@ -178,7 +178,7 @@ async function redditEvidence(candidate) {
   if (!token) return null;
   const headers = {
     Authorization: `Bearer ${token}`,
-    "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.0 (restaurant evidence)"
+    "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.3 (restaurant evidence)"
   };
   const query = [`\"${candidate.name}\"`, candidate.city ? `\"${candidate.city}\"` : "", "(food OR restaurant OR cafe OR coffee OR pizza OR burger)"].filter(Boolean).join(" ");
   const params = new URLSearchParams({ q: query, sort: "relevance", t: "all", limit: "8", type: "link", raw_json: "1" });
@@ -227,7 +227,7 @@ async function redditAccessToken() {
     headers: {
       Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.0 (restaurant evidence)"
+      "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.3 (restaurant evidence)"
     },
     body: "grant_type=client_credentials"
   });
@@ -255,7 +255,17 @@ function scoreEvidence(candidate, sources) {
   ), 30, 98);
   const google = sources.find(s => s.provider === "google");
   const yelp = sources.find(s => s.provider === "yelp");
-  const businessClosed = google?.businessStatus === "CLOSED_PERMANENTLY" || Boolean(yelp?.isClosed && google && google.businessStatus && google.businessStatus !== "OPERATIONAL");
+  const googleStatus = String(google?.businessStatus || "");
+  const googleClosed = ["CLOSED_PERMANENTLY", "CLOSED_TEMPORARILY"].includes(googleStatus);
+  const businessClosed = googleClosed || Boolean(yelp?.isClosed);
+  const closureReason =
+    googleStatus === "CLOSED_PERMANENTLY"
+      ? "Google reports this business permanently closed."
+      : googleStatus === "CLOSED_TEMPORARILY"
+        ? "Google reports this business temporarily closed."
+        : yelp?.isClosed
+          ? "Yelp reports this business closed."
+          : "";
   const sourceSummaries = sources.map(s => ({
     provider: s.provider, rating: s.rating, reviewCount: Number(s.reviewCount || 0), url: s.url || "",
     reviewAccess: s.reviewAccess || (s.reviews?.length ? "snippets" : "rating_only"),
@@ -270,12 +280,14 @@ function scoreEvidence(candidate, sources) {
     components: {
       adjustedRatingScore: roundOrNull(ratingScore), foodSentimentScore: roundOrNull(sentiment.score),
       consistencyScore: roundOrNull(consistencyScore), recencyScore: roundOrNull(recencyScore),
-      forumScore: roundOrNull(forum.score)
+      forumScore: roundOrNull(forum.score),
+      positiveFoodSignals: sentiment.positiveCount,
+      negativeFoodSignals: sentiment.negativeCount
     },
     themes: sentiment.themes, concerns: sentiment.concerns,
     summary: summaryText(foodScore, totalReviewCount, ratingSources, sentiment, forum),
     businessClosed,
-    closureReason: businessClosed ? "A connected review provider reports this business permanently closed." : "",
+    closureReason,
     sources: sourceSummaries
   };
 }
@@ -339,12 +351,63 @@ function forumEvidence(reviews) {
 
 function summaryText(foodScore, totalCount, ratingSources, sentiment, forum) {
   const parts = [`Review-backed food score ${Math.round(foodScore)}.`];
-  if (ratingSources.length) parts.push(ratingSources.map(s => `${title(s.provider)} ${Number(s.rating).toFixed(1)} (${Number(s.reviewCount).toLocaleString()})`).join(" · "));
-  if (sentiment.themes.length) parts.push(`Repeated food themes: ${sentiment.themes.join(", ")}.`);
-  if (sentiment.concerns.length) parts.push(`Recurring concerns: ${sentiment.concerns.join(", ")}.`);
-  if (forum.mentionCount) parts.push(`${forum.mentionCount} relevant forum post or comment signal${forum.mentionCount === 1 ? "" : "s"}.`);
-  if (totalCount) parts.push(`${Number(totalCount).toLocaleString()} combined rating submissions.`);
+  const ratingSummary = formatRatingEvidence(ratingSources, totalCount);
+  if (ratingSummary) parts.push(`${ratingSummary}.`);
+
+  if (sentiment.themes.length) {
+    const themeText = formatNaturalList(sentiment.themes.map(humanizeTheme));
+    const praise = sentiment.positiveCount > sentiment.negativeCount;
+    parts.push(`${praise ? "Repeated praise for" : "Reviews repeatedly mention"} ${themeText}.`);
+  }
+
+  if (sentiment.concerns.length) {
+    parts.push(`Some reviews mention ${formatNaturalList(sentiment.concerns.map(humanizeConcern))}.`);
+  }
+
+  if (forum.mentionCount) {
+    parts.push(`${forum.mentionCount} relevant forum discussion signal${forum.mentionCount === 1 ? "" : "s"}.`);
+  }
+
   return parts.join(" ");
+}
+
+function formatRatingEvidence(sources, totalCount) {
+  if (!sources.length || !totalCount) return "";
+  if (sources.length === 1) {
+    const source = sources[0];
+    return `${Number(totalCount).toLocaleString()} ${title(source.provider)} rating${Number(totalCount) === 1 ? "" : "s"}`;
+  }
+  const providers = formatNaturalList(sources.map(source => title(source.provider)));
+  return `${Number(totalCount).toLocaleString()} ratings across ${providers}`;
+}
+
+function formatNaturalList(items) {
+  const clean = items.filter(Boolean);
+  if (!clean.length) return "";
+  if (clean.length === 1) return clean[0];
+  if (clean.length === 2) return `${clean[0]} and ${clean[1]}`;
+  return `${clean.slice(0, -1).join(", ")}, and ${clean[clean.length - 1]}`;
+}
+
+function humanizeTheme(value) {
+  const labels = {
+    pizza: "pizza", crust: "pizza crust", coffee: "coffee", espresso: "espresso",
+    breakfast: "breakfast", sandwich: "sandwiches", burger: "burgers", pasta: "pasta",
+    steak: "steak", chicken: "chicken", taco: "tacos", sushi: "sushi",
+    dessert: "desserts", cookie: "cookies", bakery: "baked goods", fresh: "fresh food",
+    homemade: "homemade food", portion: "portion sizes"
+  };
+  return labels[String(value || "").toLowerCase()] || String(value || "").toLowerCase();
+}
+
+function humanizeConcern(value) {
+  const labels = {
+    bland: "bland food", cold: "food arriving cold", stale: "stale food", dry: "dry food",
+    undercooked: "undercooked food", overcooked: "overcooked food", burnt: "burnt food",
+    soggy: "soggy food", inconsistent: "inconsistent quality", greasy: "greasy food",
+    "small portion": "small portions"
+  };
+  return labels[String(value || "").toLowerCase()] || String(value || "").toLowerCase();
 }
 
 function bestMatch(candidate, options) {

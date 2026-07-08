@@ -1,8 +1,8 @@
-/* DetourEats v1.9.0 review evidence client */
+/* DetourEats v1.9.3 review evidence client */
 (function () {
   "use strict";
 
-  const CACHE_KEY = "detoureats_review_evidence_v1";
+  const CACHE_KEY = "detoureats_review_evidence_v2";
   const TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const MAX_REQUEST = 5;
   const inflight = new Set();
@@ -35,6 +35,7 @@
     const existingDestination = finite(candidate.destinationWorthiness) ?? 60;
     const forum = finite(evidence.components?.forumScore);
     const destination = clamp(existingDestination * .75 + food * .15 + (forum === null ? existingDestination : forum) * .10, 0, 100);
+    const confirmedClosed = Boolean(evidence.businessClosed);
     return {
       ...candidate,
       reviewEvidence: evidence,
@@ -45,6 +46,11 @@
       consistency: Math.round(finite(evidence.components?.consistencyScore) ?? finite(candidate.consistency) ?? 62),
       destinationWorthiness: Math.round(destination),
       evidenceSummary: evidence.summary || candidate.evidenceSummary,
+      openAtArrival: confirmedClosed ? false : candidate.openAtArrival,
+      hoursConfidence: confirmedClosed ? "provider_confirmed_closed" : candidate.hoursConfidence,
+      operationalStatus: confirmedClosed ? "closed" : candidate.operationalStatus,
+      operationalConfidence: confirmedClosed ? "high" : candidate.operationalConfidence,
+      operationalReason: confirmedClosed ? (evidence.closureReason || "A connected review provider reports this business closed.") : candidate.operationalReason,
       sourceType: appendSources(candidate.sourceType, evidence.sources)
     };
   }

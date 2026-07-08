@@ -1,4 +1,13 @@
-# DetourEats App v1.9.0 Review-Backed Scoring
+# DetourEats App v1.9.3 Preference Integrity
+
+This release keeps the v1.9.2 skip-flow and Road Ahead improvements while making every skip reason produce a semantically valid replacement or a clearly labeled fallback.
+
+## v1.9.3 highlights
+
+- **Need something faster** never labels a farther-away restaurant as faster.
+- Skip choices are checked against the skipped restaurant’s arrival time, added trip time, price tier, cuisine, and score as applicable.
+- Sparse routes return the best available fallback with an explanation instead of silently violating the selected preference or producing no results.
+- The recommendation card shows whether the requested adjustment was matched.
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -881,6 +890,16 @@ This release:
   `Eating priority: Best overall` option.
 - Invalidates the previous restaurant discovery cache.
 
+
+## v1.9.1: Decision and Evidence Cleanup
+
+- Excludes restaurants when published schedules or connected providers indicate they are closed at arrival.
+- Caps recommendations with unverified arrival hours and replaces action language with **Verify hours first**.
+- Removes duplicated review summaries from the main recommendation card.
+- Uses source-specific rating language such as **80 Google ratings**.
+- Rewrites extracted review themes and concerns into natural language.
+- Compacts the intelligence and review panels for faster road-trip scanning.
+- Resets the review-evidence and service-worker caches for the new display logic.
 
 ## v1.9.0: Review-Backed Scoring
 

@@ -1,4 +1,4 @@
-/* DetourEats v1.9.0 review-backed restaurant intelligence
+/* DetourEats v1.9.3 review-backed restaurant intelligence
    This module uses only information already available to the prototype:
    curated restaurant records, OpenStreetMap metadata, route calculations,
    user feedback, and field-test reports.
@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "1.9.0-beta";
+  const VERSION = "1.9.3-beta";
   const FIELD_TEST_KEY = "detoureats_field_tests_v1";
   const ISSUE_REPORT_KEY = "detoureats_place_issues_v1";
   const LAST_SNAPSHOT_KEY = "detoureats_last_field_snapshot_v1";
@@ -131,8 +131,21 @@
       updatedAt: Date.now()
     };
 
+    const resolvedOpenAtArrival =
+      hours.open === true || hours.open === false
+        ? hours.open
+        : (candidate.openAtArrival ?? null);
+    const resolvedHoursConfidence =
+      hours.status === "verified-closed"
+        ? "verified_closed"
+        : hours.status === "schedule-likely"
+          ? "schedule_evaluated"
+          : candidate.hoursConfidence;
+
     return {
       ...candidate,
+      openAtArrival: resolvedOpenAtArrival,
+      hoursConfidence: resolvedHoursConfidence,
       intelligence,
       intelligenceLevel: level.key,
       intelligenceLabel: level.label,
@@ -620,15 +633,9 @@
   function buildWhySpecial(candidate, level) {
     if (
       candidate.reviewEvidence
-        ?.status === "ready" &&
-      candidate.reviewEvidence
-        .summary
+        ?.status === "ready"
     ) {
-      return truncate(
-        candidate.reviewEvidence
-          .summary,
-        190
-      );
+      return buildRestaurantSnapshot(candidate);
     }
 
     if (candidate.evidenceSummary) {
@@ -709,7 +716,7 @@
       return (
         `Review-backed food score ${evidence.foodScore} · ` +
         `${evidence.confidenceLabel} confidence · ` +
-        `${Number(evidence.totalReviewCount || 0).toLocaleString()} combined ratings`
+        formatRatingEvidence(evidence)
       );
     }
 
@@ -721,6 +728,21 @@
     }
 
     return "No live review evidence attached";
+  }
+
+  function formatRatingEvidence(evidence) {
+    const ratingSources = (evidence?.sources || [])
+      .filter(source => Number.isFinite(Number(source.rating)) && Number(source.reviewCount || 0) > 0);
+    const total = Number(evidence?.totalReviewCount || 0);
+    if (!ratingSources.length || !total) return "No rating count available";
+    if (ratingSources.length === 1) {
+      return `${total.toLocaleString()} ${titleCase(ratingSources[0].provider)} rating${total === 1 ? "" : "s"}`;
+    }
+    const providers = ratingSources.map(source => titleCase(source.provider));
+    const providerText = providers.length === 2
+      ? `${providers[0]} and ${providers[1]}`
+      : `${providers.slice(0, -1).join(", ")}, and ${providers[providers.length - 1]}`;
+    return `${total.toLocaleString()} ratings across ${providerText}`;
   }
 
   function titleCase(value) {

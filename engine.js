@@ -1,4 +1,4 @@
-/* DetourEats v1.9.0 Review-Backed Scoring Engine
+/* DetourEats v1.9.3 Review-Backed Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -17,7 +17,21 @@ It is restaurant quality filtered through trip fit.
 
   function recommend(candidates, settings = {}) {
     const normalized = (candidates || []).map(normalizeCandidate);
-    const visible = filterCandidates(normalized, settings);
+    let visible = filterCandidates(normalized, settings);
+    let usedDeferredFallback = false;
+
+    if (
+      !visible.length &&
+      String(settings.skipIntent?.reason || "") === "not-hungry" &&
+      number(settings.deferUntilSeq, 0) > number(settings.routePosition, 0)
+    ) {
+      visible = filterCandidates(normalized, {
+        ...settings,
+        deferUntilSeq: number(settings.routePosition, 0)
+      });
+      usedDeferredFallback = true;
+    }
+
     const scored = visible
       .map(candidate => scoreCandidate(candidate, settings, normalized))
       .sort((a, b) => b.detourScore - a.detourScore);
@@ -34,20 +48,28 @@ It is restaurant quality filtered through trip fit.
       settings
     );
 
-    let pick = chooseByChainPolicy(eligible, settings)[0] || null;
+    const policyEligible = chooseByChainPolicy(eligible, settings);
+    const policyScored = chooseByChainPolicy(scored, settings);
+    const rankedForSelection = policyEligible.length ? policyEligible : policyScored;
+    let pick = rankedForSelection[0] || null;
+    const skipSelection = selectBySkipIntent(policyScored, settings);
+
+    if (skipSelection.pick) {
+      pick = skipSelection.pick;
+    }
 
     const style = String(settings.tripMode || "balanced").toLowerCase();
-    if (style.includes("hungry")) {
-      const earliestGoodEnough = chooseByChainPolicy(eligible, settings)
+    if (style.includes("hungry") && !skipSelection.lockPick) {
+      const earliestGoodEnough = rankedForSelection
         .filter(c =>
           c.openAtArrival !== false &&
           c.restaurantQuality >= 72 &&
           c.detourScore >= 74
         )
         .sort((a, b) => {
-          const aSeq = Number(a.seq ?? 999);
-          const bSeq = Number(b.seq ?? 999);
-          if (aSeq !== bSeq) return aSeq - bSeq;
+          const aAhead = candidateMinutesAhead(a, settings);
+          const bAhead = candidateMinutesAhead(b, settings);
+          if (aAhead !== bAhead) return aAhead - bAhead;
 
           const aAdded = Number(a.estimatedAddedMinutes ?? 999);
           const bAdded = Number(b.estimatedAddedMinutes ?? 999);
@@ -59,6 +81,14 @@ It is restaurant quality filtered through trip fit.
       if (earliestGoodEnough) {
         pick = earliestGoodEnough;
       }
+    }
+
+    const preferredCandidateId = String(settings.preferredCandidateId || "");
+    if (preferredCandidateId) {
+      const preferred = policyScored.find(
+        candidate => String(candidate.id) === preferredCandidateId
+      );
+      if (preferred) pick = preferred;
     }
 
     const rankedEligible = chooseByChainPolicy(
@@ -88,8 +118,256 @@ It is restaurant quality filtered through trip fit.
       routeOutlook,
       nextAlternative,
       exceptionalOpportunity,
-      decision
+      decision,
+      preferenceOutcome: usedDeferredFallback && !skipSelection.outcome
+        ? {
+            matched: false,
+            label: "No later stop available",
+            message: "The route window has no later qualifying stop, so the best remaining option is shown as a fallback."
+          }
+        : skipSelection.outcome
     };
+  }
+
+  function candidateMinutesAhead(candidate, settings = {}) {
+    const direct = Number(candidate?.minutesAhead);
+    if (Number.isFinite(direct)) return Math.max(0, direct);
+
+    const decision = Number(candidate?.decisionMinutes);
+    if (Number.isFinite(decision)) return Math.max(0, decision + 10);
+
+    const routePosition = number(settings.routePosition, 0);
+    return Math.max(0, number(candidate?.seq, routePosition) - routePosition) * 45;
+  }
+
+  function candidateCuisine(candidate) {
+    return String(candidate?.cuisine || candidate?.category || "").trim();
+  }
+
+  function priceRank(value) {
+    const text = String(value || "").trim();
+    if (!text) return 99;
+    const dollars = (text.match(/\$/g) || []).length;
+    return dollars || 99;
+  }
+
+  function formatPreferenceMinutes(value) {
+    const minutes = Math.max(0, Math.round(number(value, 0)));
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? `${hours} hr ${remainder} min` : `${hours} hr`;
+  }
+
+  function selectBySkipIntent(ranked, settings = {}) {
+    const intent = settings.skipIntent;
+    if (!intent || !ranked.length) {
+      return { pick: null, lockPick: false, outcome: null };
+    }
+
+    const candidates = ranked.filter(candidate =>
+      String(candidate.id) !== String(intent.referenceId || "")
+    );
+    if (!candidates.length) {
+      return {
+        pick: null,
+        lockPick: false,
+        outcome: {
+          matched: false,
+          label: "No alternative available",
+          message: "No remaining open stop matches this request yet."
+        }
+      };
+    }
+
+    const byScore = [...candidates].sort((a, b) => b.detourScore - a.detourScore);
+    const referenceAhead = number(intent.referenceMinutesAhead, Infinity);
+    const referenceAdded = number(intent.referenceAddedMinutes, Infinity);
+    const referencePrice = priceRank(intent.referencePriceLevel);
+    const reason = String(intent.reason || "");
+
+    if (reason === "need-faster") {
+      const strict = candidates
+        .filter(candidate => {
+          const ahead = candidateMinutesAhead(candidate, settings);
+          const added = number(candidate.estimatedAddedMinutes, Infinity);
+          return ahead < referenceAhead && added < referenceAdded;
+        })
+        .sort((a, b) => {
+          const aTotal = candidateMinutesAhead(a, settings) + number(a.estimatedAddedMinutes, 999) * 0.75;
+          const bTotal = candidateMinutesAhead(b, settings) + number(b.estimatedAddedMinutes, 999) * 0.75;
+          if (aTotal !== bTotal) return aTotal - bTotal;
+          return b.detourScore - a.detourScore;
+        });
+
+      const practical = strict.length ? strict : candidates
+        .filter(candidate => {
+          const ahead = candidateMinutesAhead(candidate, settings);
+          const added = number(candidate.estimatedAddedMinutes, Infinity);
+          return (
+            ahead <= referenceAhead &&
+            (
+              (ahead < referenceAhead && added <= referenceAdded + 2) ||
+              added < referenceAdded
+            )
+          );
+        })
+        .sort((a, b) => {
+          const aAhead = candidateMinutesAhead(a, settings);
+          const bAhead = candidateMinutesAhead(b, settings);
+          if (aAhead !== bAhead) return aAhead - bAhead;
+          const aAdded = number(a.estimatedAddedMinutes, 999);
+          const bAdded = number(b.estimatedAddedMinutes, 999);
+          if (aAdded !== bAdded) return aAdded - bAdded;
+          return b.detourScore - a.detourScore;
+        });
+
+      if (practical.length) {
+        const pick = practical[0];
+        return {
+          pick,
+          lockPick: true,
+          outcome: {
+            matched: true,
+            label: "Faster option found",
+            message: `${pick.name} is ${formatPreferenceMinutes(candidateMinutesAhead(pick, settings))} ahead and adds ${Math.round(number(pick.estimatedAddedMinutes, 0))} min.`
+          }
+        };
+      }
+
+      const fallback = [...candidates].sort((a, b) => {
+        const aAhead = candidateMinutesAhead(a, settings);
+        const bAhead = candidateMinutesAhead(b, settings);
+        if (aAhead !== bAhead) return aAhead - bAhead;
+        const aAdded = number(a.estimatedAddedMinutes, 999);
+        const bAdded = number(b.estimatedAddedMinutes, 999);
+        if (aAdded !== bAdded) return aAdded - bAdded;
+        return b.detourScore - a.detourScore;
+      })[0];
+
+      return {
+        pick: fallback,
+        lockPick: true,
+        outcome: {
+          matched: false,
+          label: "No truly faster alternative",
+          message: `The earliest remaining stop is ${formatPreferenceMinutes(candidateMinutesAhead(fallback, settings))} ahead, so it is being shown as the best fallback, not as a faster result.`
+        }
+      };
+    }
+
+    if (reason === "too-far") {
+      const closer = candidates
+        .filter(candidate => number(candidate.estimatedAddedMinutes, Infinity) < referenceAdded)
+        .sort((a, b) => {
+          const aAdded = number(a.estimatedAddedMinutes, 999);
+          const bAdded = number(b.estimatedAddedMinutes, 999);
+          if (aAdded !== bAdded) return aAdded - bAdded;
+          const aAhead = candidateMinutesAhead(a, settings);
+          const bAhead = candidateMinutesAhead(b, settings);
+          if (aAhead !== bAhead) return aAhead - bAhead;
+          return b.detourScore - a.detourScore;
+        });
+      const pick = closer[0] || [...candidates].sort((a, b) =>
+        number(a.estimatedAddedMinutes, 999) - number(b.estimatedAddedMinutes, 999) ||
+        candidateMinutesAhead(a, settings) - candidateMinutesAhead(b, settings) ||
+        b.detourScore - a.detourScore
+      )[0];
+      const matched = number(pick.estimatedAddedMinutes, Infinity) < referenceAdded;
+      return {
+        pick,
+        lockPick: true,
+        outcome: {
+          matched,
+          label: matched ? "Shorter detour found" : "No shorter detour available",
+          message: matched
+            ? `${pick.name} adds ${Math.round(number(pick.estimatedAddedMinutes, 0))} min, less than the skipped stop.`
+            : `${pick.name} has the smallest remaining detour, but it is not shorter than the skipped stop.`
+        }
+      };
+    }
+
+    if (reason === "not-hungry") {
+      const later = candidates
+        .filter(candidate => candidateMinutesAhead(candidate, settings) >= referenceAhead + number(intent.minimumLaterMinutes, 10))
+        .sort((a, b) => candidateMinutesAhead(a, settings) - candidateMinutesAhead(b, settings) || b.detourScore - a.detourScore);
+      const pick = later[0] || byScore[0];
+      const matched = candidateMinutesAhead(pick, settings) > referenceAhead;
+      return {
+        pick,
+        lockPick: true,
+        outcome: {
+          matched,
+          label: matched ? "Later stop selected" : "No later stop available",
+          message: matched
+            ? `${pick.name} is farther down the route at ${formatPreferenceMinutes(candidateMinutesAhead(pick, settings))} ahead.`
+            : "No later qualifying stop is available, so the best remaining option is shown as a fallback."
+        }
+      };
+    }
+
+    if (reason === "too-expensive") {
+      const cheaper = candidates
+        .filter(candidate => priceRank(candidate.priceLevel) < referencePrice)
+        .sort((a, b) => priceRank(a.priceLevel) - priceRank(b.priceLevel) || b.detourScore - a.detourScore);
+      const priced = candidates
+        .filter(candidate => priceRank(candidate.priceLevel) < 99)
+        .sort((a, b) => priceRank(a.priceLevel) - priceRank(b.priceLevel) || b.detourScore - a.detourScore);
+      const pick = cheaper[0] || priced[0] || byScore[0];
+      const matched = referencePrice < 99 && priceRank(pick.priceLevel) < referencePrice;
+      return {
+        pick,
+        lockPick: true,
+        outcome: {
+          matched,
+          label: matched ? "Cheaper option found" : "Cheapest available fallback",
+          message: matched
+            ? `${pick.name} is listed at a lower price tier (${pick.priceLevel}).`
+            : "No clearly cheaper option is available from the current price data, so the best lower-cost candidate is shown."
+        }
+      };
+    }
+
+    if (reason === "wrong-cuisine") {
+      const excluded = String(intent.excludedCategory || intent.referenceCategory || "").toLowerCase();
+      const different = candidates.filter(candidate => {
+        const category = candidateCuisine(candidate).toLowerCase();
+        return !excluded || (category && category !== excluded && !category.includes(excluded) && !excluded.includes(category));
+      });
+      const pick = (different.length ? different : byScore)[0];
+      const matched = different.includes(pick);
+      return {
+        pick,
+        lockPick: true,
+        outcome: {
+          matched,
+          label: matched ? "Different cuisine selected" : "Cuisine fallback",
+          message: matched
+            ? `${pick.name} is outside the cuisine category you skipped.`
+            : "No clearly different cuisine is available in the current route window."
+        }
+      };
+    }
+
+    if (reason === "show-better") {
+      const target = number(intent.targetScore, number(settings.minimumScore, 0));
+      const stronger = candidates.filter(candidate => candidate.detourScore >= target);
+      const pick = (stronger.length ? stronger : byScore)[0];
+      const matched = pick.detourScore >= target;
+      return {
+        pick,
+        lockPick: true,
+        outcome: {
+          matched,
+          label: matched ? "Stronger stop found" : "Best available fallback",
+          message: matched
+            ? `${pick.name} clears the requested Detour Score of ${Math.round(target)}.`
+            : `Nothing remaining reaches ${Math.round(target)}, so the strongest available stop is shown instead of returning no results.`
+        }
+      };
+    }
+
+    return { pick: null, lockPick: false, outcome: null };
   }
 
   function normalizeCandidate(c) {
@@ -171,10 +449,9 @@ It is restaurant quality filtered through trip fit.
       if (c.seq > maxSeq) return false;
       if (chainPolicy === "avoid" && c.chain) return false;
       if (c.backtracking) return false;
-      if (settings.hoursMode !== "warnOnly" && c.openAtArrival === false) return false;
+      if (c.openAtArrival === false) return false;
       if (stopType === "quick" && !c.quickStop) return false;
       if (stopType === "sitdown" && !c.sitDown) return false;
-      if (pricePreference === "budget" && c.priceLevel !== "$") return false;
 
       const category = String(c.category || "").toLowerCase();
       if (excludedCategories.some(excluded => category.includes(excluded) || excluded.includes(category))) {
@@ -538,6 +815,20 @@ It is restaurant quality filtered through trip fit.
           84
         );
       }
+    }
+
+    // A restaurant that appears closed is never a valid recommendation.
+    // Unknown arrival hours can remain visible, but cannot look like a fully
+    // verified top decision.
+    if (c.openAtArrival === false) {
+      detourScore = 0;
+    } else if (c.openAtArrival === null) {
+      const unknownHoursCap =
+        c.provenance === "route-discovered" ||
+        c.discoverySource === "openstreetmap"
+          ? 82
+          : 86;
+      detourScore = Math.min(detourScore, unknownHoursCap);
     }
 
     detourScore = Math.round(detourScore);
@@ -1109,6 +1400,22 @@ It is restaurant quality filtered through trip fit.
       };
     }
 
+    if (pick.openAtArrival === false) {
+      return {
+        state: "keep-driving",
+        headline: "Keep driving.",
+        detail: "This restaurant appears closed at your estimated arrival time."
+      };
+    }
+
+    if (pick.openAtArrival === null) {
+      return {
+        state: "verify-hours",
+        headline: "Verify hours first.",
+        detail: "The food case is promising, but arrival-time hours are not confirmed."
+      };
+    }
+
     const laterBetter = nextAlternative &&
       nextAlternative.detourScore >= pick.detourScore + 5
         ? nextAlternative
@@ -1159,6 +1466,46 @@ It is restaurant quality filtered through trip fit.
     return TIER_RULES.find(rule => score >= rule.min) || TIER_RULES[TIER_RULES.length - 1];
   }
 
+  function formatRatingEvidence(evidence) {
+    const sources = (evidence?.sources || [])
+      .filter(source => Number.isFinite(Number(source.rating)) && Number(source.reviewCount || 0) > 0);
+    const total = Number(evidence?.totalReviewCount || 0);
+    if (!sources.length || !total) return "available review evidence";
+    if (sources.length === 1) {
+      const provider = titleCase(sources[0].provider);
+      return `${total.toLocaleString()} ${provider} rating${total === 1 ? "" : "s"}`;
+    }
+    return `${total.toLocaleString()} ratings across ${formatNaturalList(sources.map(source => titleCase(source.provider)))}`;
+  }
+
+  function hasPositiveFoodSignal(evidence) {
+    return Number(evidence?.components?.positiveFoodSignals || 0) >
+      Number(evidence?.components?.negativeFoodSignals || 0);
+  }
+
+  function formatNaturalList(items) {
+    const clean = items.filter(Boolean);
+    if (!clean.length) return "";
+    if (clean.length === 1) return clean[0];
+    if (clean.length === 2) return `${clean[0]} and ${clean[1]}`;
+    return `${clean.slice(0, -1).join(", ")}, and ${clean[clean.length - 1]}`;
+  }
+
+  function humanizeTheme(value) {
+    const labels = {
+      pizza: "pizza", crust: "pizza crust", coffee: "coffee", espresso: "espresso",
+      breakfast: "breakfast", sandwich: "sandwiches", burger: "burgers", pasta: "pasta",
+      steak: "steak", chicken: "chicken", taco: "tacos", sushi: "sushi",
+      dessert: "desserts", cookie: "cookies", bakery: "baked goods", fresh: "fresh food",
+      homemade: "homemade food", portion: "portion sizes"
+    };
+    return labels[String(value || "").toLowerCase()] || String(value || "").toLowerCase();
+  }
+
+  function titleCase(value) {
+    return String(value || "").replace(/\b\w/g, letter => letter.toUpperCase());
+  }
+
   function explainScore(c, s) {
     const bullets = [];
 
@@ -1170,11 +1517,11 @@ It is restaurant quality filtered through trip fit.
         const evidence =
           c.reviewEvidence;
         bullets.push(
-          `Food score uses ${Number(evidence.totalReviewCount || 0).toLocaleString()} combined rating submissions from ${Number(evidence.sourceCount || 0)} connected source${Number(evidence.sourceCount || 0) === 1 ? "" : "s"}.`
+          `Food score uses ${formatRatingEvidence(evidence)}.`
         );
         if (evidence.themes?.length) {
           bullets.push(
-            `Repeated food themes: ${evidence.themes.join(", ")}.`
+            `${hasPositiveFoodSignal(evidence) ? "Repeated praise for" : "Reviews repeatedly mention"} ${formatNaturalList(evidence.themes.map(humanizeTheme))}.`
           );
         }
         if (evidence.forumMentionCount) {

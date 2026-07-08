@@ -1,18 +1,18 @@
-const CACHE_NAME = "detoureats-v1-9-0-review-backed-scoring";
+const CACHE_NAME = "detoureats-v1-9-3-preference-integrity";
 
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=1.9.0",
-  "./data.js?v=1.9.0",
-  "./engine.js?v=1.9.0",
-  "./review-evidence.js?v=1.9.0",
-  "./place-status.js?v=1.9.0",
-  "./live-route.js?v=1.9.0",
-  "./address-search.js?v=1.9.0",
-  "./restaurant-intelligence.js?v=1.9.0",
-  "./app.js?v=1.9.0",
-  "./manifest.webmanifest?v=1.9.0",
+  "./styles.css?v=1.9.3",
+  "./data.js?v=1.9.3",
+  "./engine.js?v=1.9.3",
+  "./review-evidence.js?v=1.9.3",
+  "./place-status.js?v=1.9.3",
+  "./live-route.js?v=1.9.3",
+  "./address-search.js?v=1.9.3",
+  "./restaurant-intelligence.js?v=1.9.3",
+  "./app.js?v=1.9.3",
+  "./manifest.webmanifest?v=1.9.3",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
 ];

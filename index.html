@@ -6,9 +6,9 @@
   <meta name="theme-color" content="#14532d">
   <meta name="description" content="DetourEats tells you when food is worth the stop on a road trip. No scrolling. No decision fatigue.">
   <title>DetourEats</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.9.0">
+  <link rel="manifest" href="manifest.webmanifest?v=1.9.3">
   <link rel="icon" href="icons/icon-192.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=1.9.0">
+  <link rel="stylesheet" href="styles.css?v=1.9.3">
 </head>
 <body>
   <main class="app-shell">
@@ -362,10 +362,11 @@
       </div>
 
 
-      <section id="skipReasonPanel" class="skip-reason-panel hidden" aria-live="polite">
+      <div id="skipReasonBackdrop" class="skip-reason-backdrop hidden" aria-hidden="true"></div>
+      <section id="skipReasonPanel" class="skip-reason-panel hidden" aria-live="polite" role="dialog" aria-modal="true" aria-labelledby="skipReasonTitle">
         <div class="skip-sheet-header">
           <div>
-            <strong>Why skip this one?</strong>
+            <strong id="skipReasonTitle">Why skip this one?</strong>
             <span>We’ll adjust the next recommendation.</span>
           </div>
           <button id="closeSkipPanelButton" class="skip-close" type="button" aria-label="Close">×</button>
@@ -377,7 +378,8 @@
           <button type="button" data-skip-reason="wrong-cuisine">Wrong cuisine</button>
           <button type="button" data-skip-reason="too-expensive">Too expensive</button>
           <button type="button" data-skip-reason="need-faster">Need something faster</button>
-          <button type="button" data-skip-reason="show-better">Show me something better</button>
+          <button type="button" data-skip-reason="show-better">Wait for something better</button>
+          <button type="button" data-skip-reason="other">Other</button>
         </div>
       </section>
 
@@ -506,16 +508,16 @@
   </div>
 
   <div class="build-version" aria-label="Application version">
-    DetourEats v1.9.0
+    DetourEats v1.9.3
   </div>
 
-  <script src="data.js?v=1.9.0"></script>
-  <script src="engine.js?v=1.9.0"></script>
-  <script src="review-evidence.js?v=1.9.0"></script>
-  <script src="place-status.js?v=1.9.0"></script>
-  <script src="live-route.js?v=1.9.0"></script>
-  <script src="address-search.js?v=1.9.0"></script>
-  <script src="restaurant-intelligence.js?v=1.9.0"></script>
-  <script src="app.js?v=1.9.0"></script>
+  <script src="data.js?v=1.9.3"></script>
+  <script src="engine.js?v=1.9.3"></script>
+  <script src="review-evidence.js?v=1.9.3"></script>
+  <script src="place-status.js?v=1.9.3"></script>
+  <script src="live-route.js?v=1.9.3"></script>
+  <script src="address-search.js?v=1.9.3"></script>
+  <script src="restaurant-intelligence.js?v=1.9.3"></script>
+  <script src="app.js?v=1.9.3"></script>
 </body>
 </html>
