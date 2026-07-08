@@ -14,7 +14,7 @@ This package is a complete replacement for the current GitHub repository files.
 
 A successful deployment displays:
 
-`DetourEats v1.9.4`
+`DetourEats v1.9.5`
 
 If that version is not visible, the live site is still serving older files or
 the package was uploaded inside an extra folder.
@@ -40,27 +40,30 @@ the package was uploaded inside an extra folder.
 
 ## Cache handling
 
-This release changes every CSS and JavaScript reference to include `v=1.9.4`.
+This release changes every CSS and JavaScript reference to include `v=1.9.5`.
 Its service worker immediately activates, deletes older DetourEats caches, and
 checks the network before using cached app files.
 
 
-## v1.9.4 serverless function
+## v1.9.5 serverless function
 
 The repository now includes `api/restaurant-evidence.js`. Vercel should detect it automatically as a Node.js Function while serving the static application from the repository root.
 
 After adding provider credentials in Vercel, redeploy production. Verify:
 
 - `/api/restaurant-evidence` returns `method_not_allowed` for a browser GET rather than a 404
-- the footer says `DetourEats v1.9.4`
+- the footer says `DetourEats v1.9.5`
 - a recommendation initially shows a provisional Food estimate and then updates to a review-backed Food score after evidence is returned
-## v1.9.4 preference verification
+## v1.9.5 display verification
 
-After deployment, test the skip sheet on a route with several options:
+After deployment, run a route with several restaurant results and confirm:
 
-1. Select **Need something faster**. A matched result must be no farther away than the skipped stop.
-2. If no faster stop exists, the card must say **No truly faster alternative** rather than presenting the fallback as faster.
-3. Select **Wait for something better** with no stronger option available. The app must still show the best available restaurant.
-4. Confirm **Too far**, **Too expensive**, **Wrong cuisine**, and **Not hungry yet** display either a matched adjustment or a clearly labeled fallback.
-5. Compare the **Skip and wait** time against the Road Ahead arrival times. It must use the actual difference between those stops, not a sequence-based estimate.
+1. The town or city appears directly beneath the active restaurant name.
+2. The card shows a clear **Known for** or **Food type** line.
+3. Google rating and count appear once on the main card, not again as a duplicate chip.
+4. Opening **Tell Me Why** still exposes provider source links.
+5. Road Ahead choices show both their location and food focus.
+6. The time card says **Added driving time** and clarifies that food, parking, and wait time are not included.
+7. Restaurants missing map locality data receive a city from connected provider evidence when available.
 
+Also rerun the v1.9.4 skip checks: **Need something faster** must not return a slower match, **Wait for something better** must preserve a fallback, and **Skip and wait** must use actual route-time differences.

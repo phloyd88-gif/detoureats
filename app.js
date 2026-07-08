@@ -1,4 +1,4 @@
-/* DetourEats v1.9.4 Review-Backed Scoring
+/* DetourEats v1.9.5 Restaurant Identity and Food Focus
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -976,6 +976,92 @@ function humanizeReviewConcern(value) {
   return labels[String(value || "").toLowerCase()] || String(value || "").toLowerCase();
 }
 
+function titleCaseFoodLabel(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function getPlaceLocationLabel(pick) {
+  const city = String(pick?.city || "").trim();
+  if (city) return city;
+
+  const address = String(pick?.address || "").trim();
+  if (!address) return "Along your route";
+
+  const parts = address.split(",").map(part => part.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const working = [...parts];
+    if (/^(?:USA|United States|United States of America)$/i.test(working[working.length - 1])) {
+      working.pop();
+    }
+    const statePart = String(working[working.length - 1] || "")
+      .replace(/\b\d{5}(?:-\d{4})?\b/g, "")
+      .trim();
+    const locality = String(working[working.length - 2] || "").trim();
+    if (locality && /^[A-Za-z .'-]+$/.test(locality)) {
+      return statePart ? `${locality}, ${statePart}` : locality;
+    }
+  }
+
+  return address;
+}
+
+function getFoodFocus(pick) {
+  const themes = (pick?.reviewEvidence?.themes || [])
+    .map(humanizeReviewTheme)
+    .filter(Boolean)
+    .slice(0, 3);
+
+  if (themes.length) {
+    return {
+      label: "Known for",
+      text: formatNaturalList(themes)
+    };
+  }
+
+  const specific =
+    pick?.famousFor ||
+    pick?.signatureDish ||
+    pick?.signatureItem ||
+    "";
+  if (specific) {
+    return {
+      label: "Known for",
+      text: String(specific).replace(/[.!?]+$/, "")
+    };
+  }
+
+  const evidenceType = (pick?.reviewEvidence?.categories || [])
+    .map(value => String(value || "").replaceAll("_", " ").trim())
+    .find(value => value && !["restaurant", "food", "cafe", "café", "fast food", "forum discussion"].includes(value.toLowerCase()));
+  const rawType = String(pick?.cuisine || evidenceType || pick?.category || "")
+    .replaceAll("_", " ")
+    .trim();
+  const generic = ["", "restaurant", "food", "cafe", "café", "fast food"];
+  if (!generic.includes(rawType.toLowerCase())) {
+    return {
+      label: "Food type",
+      text: titleCaseFoodLabel(rawType)
+    };
+  }
+
+  const snapshot = String(pick?.signature || "").replace(/[.!?]+$/, "").trim();
+  if (snapshot && !/^restaurant near the route$/i.test(snapshot)) {
+    return {
+      label: "Food type",
+      text: snapshot
+    };
+  }
+
+  return {
+    label: "Food type",
+    text: "General restaurant"
+  };
+}
+
 function getRatingEvidenceText(evidence) {
   const sources = (evidence?.sources || [])
     .filter(source => Number.isFinite(Number(source.rating)) && Number(source.reviewCount || 0) > 0);
@@ -1031,7 +1117,7 @@ function buildReviewEvidenceNarrative(evidence) {
   return sentences.join(" ") || "Live rating evidence is attached to this restaurant.";
 }
 
-function renderReviewEvidenceSummary(pick) {
+function renderReviewEvidenceSummary(pick, options = {}) {
   const evidence = pick?.reviewEvidence;
   if (evidence?.status !== "ready") {
     const status = window.DetourEatsReviewEvidence?.getProviderStatus?.();
@@ -1057,7 +1143,7 @@ function renderReviewEvidenceSummary(pick) {
       <div><strong>${escapeHtml(evidence.confidenceLabel)}</strong><span>confidence</span></div>
     </div>
     <p class="review-evidence-narrative">${escapeHtml(buildReviewEvidenceNarrative(evidence))}</p>
-    <div class="review-source-chips">${sources}</div>
+    ${options.showSources ? `<div class="review-source-chips">${sources}</div>` : ""}
   </section>`;
 }
 
@@ -1502,6 +1588,8 @@ function renderDecisionCard(pick, trip, copy) {
   const timing = getDecisionTiming(pick);
   const comparison = getScoreComparison(pick, state.currentResult);
   const explanation = pick.scoreExplanation || {};
+  const locationLabel = getPlaceLocationLabel(pick);
+  const foodFocus = getFoodFocus(pick);
   const scoreClass =
     pick.score >= 92 ? "score-elite" :
     pick.score >= 84 ? "score-strong" :
@@ -1527,6 +1615,11 @@ function renderDecisionCard(pick, trip, copy) {
       <div class="decision-copy">
         <p class="driver-decision-label">${escapeHtml(trip.headline)}</p>
         <h2 class="place-name">${escapeHtml(pick.name)}</h2>
+        <p class="place-location">${escapeHtml(locationLabel)}</p>
+        <div class="food-focus-line">
+          <span>${escapeHtml(foodFocus.label)}</span>
+          <strong>${escapeHtml(foodFocus.text)}</strong>
+        </div>
         <p class="meta">${escapeHtml(trip.subline)}</p>
         <div class="score-comparison ${comparison.className}">
           ${escapeHtml(comparison.text)}
@@ -1567,15 +1660,15 @@ function renderDecisionCard(pick, trip, copy) {
     <div class="fact-grid driver-fact-grid">
       <div class="fact highlight">
         <strong>Adds ${pick.added} min</strong>
-        <span>${pick.liveRoute ? "Live route impact" : "Estimated trip impact"}</span>
+        <span>${pick.liveRoute ? "Added driving time versus staying on route" : "Estimated added driving time"} · food, parking, and wait time not included</span>
       </div>
       <div class="fact">
         <strong>${escapeHtml(openLabel)}</strong>
         <span>${pick.liveRoute ? "Live ETA" : "Estimated arrival"} ${escapeHtml(String(pick.arrival))}</span>
       </div>
       <div class="fact">
-        <strong>${escapeHtml(pick.city || "Along your route")}</strong>
-        <span>${escapeHtml(pick.signature)}</span>
+        <strong>${escapeHtml(foodFocus.text)}</strong>
+        <span>${escapeHtml(foodFocus.label)}</span>
       </div>
     </div>
 
@@ -1709,7 +1802,8 @@ function renderTripTimeline(pick, result) {
             <div class="timeline-score"><small>Score</small><strong>${candidate.score}</strong></div>
           </div>
           <h3>${escapeHtml(candidate.name)}</h3>
-          <p>${escapeHtml(candidate.city || candidate.category || "")}</p>
+          <p class="timeline-location">${escapeHtml(getPlaceLocationLabel(candidate))}</p>
+          <p class="timeline-food-focus"><strong>${escapeHtml(getFoodFocus(candidate).label)}:</strong> ${escapeHtml(getFoodFocus(candidate).text)}</p>
           <div class="timeline-provenance ${candidate.provenance === "route-discovered" ? "provenance-discovered" : "provenance-curated"}">
             ${candidate.provenance === "route-discovered" ? "Route-discovered option" : "Curated recommendation"}
           </div>
@@ -1862,7 +1956,7 @@ function renderDetailsPanel(pick, trip, copy) {
     </ul>
 
     ${renderRestaurantIntelligenceDetails(pick)}
-    ${renderReviewEvidenceSummary(pick)}
+    ${renderReviewEvidenceSummary(pick, { showSources: true })}
 
     <div class="trust-section">
       <h3>${pick.provenance === "route-discovered" ? "Available route data" : "Verified facts"}</h3>
@@ -3929,7 +4023,7 @@ function escapeHtml(value) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.9.4", {
+      .register("service-worker.js?v=1.9.5", {
         updateViaCache: "none"
       })
       .then(registration => {

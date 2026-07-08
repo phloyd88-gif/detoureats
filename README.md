@@ -1,15 +1,16 @@
-# DetourEats App v1.9.4 Route Timing and Skip Fallbacks
+# DetourEats App v1.9.5 Location and Food Focus
 
-This release corrects Road Ahead timing and makes skip reasons one-step preferences rather than hidden permanent trip filters.
+This release makes each recommendation easier to understand at a glance: where the restaurant is, what kind of food it serves or does well, and what the added-time number actually means.
 
-## v1.9.4 highlights
+## v1.9.5 highlights
 
-- Road Ahead wait times now use each restaurant’s actual live-route minutes instead of multiplying sequence positions by a fixed interval.
-- The next alternative is selected by real forward route timing, not by sequence gap alone.
-- **Wait for something better** no longer creates a hard minimum-score threshold.
-- Skip reasons no longer silently rewrite trip mode, price, detour, or timing settings.
-- If an earlier adjustment empties the normal window, DetourEats widens to the remaining safe, open, forward candidates and labels the fallback.
-- Empty results now mean there is genuinely no remaining open alternative in the current route results.
+- The town or city now appears directly beneath the restaurant name.
+- A prominent **Known for** or **Food type** line uses review themes, cuisine, provider categories, or curated specialties.
+- Road Ahead cards now include both location and food focus before the driver selects one.
+- The main review card shows the Google rating once instead of repeating it in a second source chip.
+- Provider source links remain available in the detailed evidence panel.
+- **Live route impact** is renamed **Added driving time** and explicitly excludes food, parking, and wait time.
+- Missing city and food-category fields can be enriched from matched Google Places or Yelp evidence.
 
 This is the cleaned-up public prototype for DetourEats.com.
 

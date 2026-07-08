@@ -1,4 +1,4 @@
-/* DetourEats v1.9.4 review-backed restaurant intelligence
+/* DetourEats v1.9.5 review-backed restaurant intelligence
    This module uses only information already available to the prototype:
    curated restaurant records, OpenStreetMap metadata, route calculations,
    user feedback, and field-test reports.
@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "1.9.4-beta";
+  const VERSION = "1.9.5-beta";
   const FIELD_TEST_KEY = "detoureats_field_tests_v1";
   const ISSUE_REPORT_KEY = "detoureats_place_issues_v1";
   const LAST_SNAPSHOT_KEY = "detoureats_last_field_snapshot_v1";

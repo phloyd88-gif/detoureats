@@ -1,8 +1,8 @@
-/* DetourEats v1.9.4 review evidence client */
+/* DetourEats v1.9.5 review evidence client */
 (function () {
   "use strict";
 
-  const CACHE_KEY = "detoureats_review_evidence_v2";
+  const CACHE_KEY = "detoureats_review_evidence_v3";
   const TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const MAX_REQUEST = 5;
   const inflight = new Set();
@@ -38,6 +38,8 @@
     const confirmedClosed = Boolean(evidence.businessClosed);
     return {
       ...candidate,
+      city: candidate.city || evidence.matchedCity || "",
+      address: candidate.address || evidence.matchedAddress || "",
       reviewEvidence: evidence,
       reviewEvidenceStatus: "ready",
       reviewBackedFoodScore: Math.round(food),

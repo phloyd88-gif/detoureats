@@ -1,5 +1,17 @@
 # DetourEats Changelog
 
+## v1.9.5 Location and Food Focus
+
+- Shows the restaurant's town or city directly beneath its name on the main recommendation card.
+- Uses the connected review themes first to display a clear **Known for** line, such as burgers and homemade food.
+- Falls back to cuisine, provider category, curated specialty, or a concise restaurant type when review themes are unavailable.
+- Adds the same location and food-focus context to every selectable Road Ahead option.
+- Removes the duplicate Google rating chip from the main recommendation card while retaining source links in the detailed evidence panel.
+- Renames the route-time label to **Added driving time** and states that food, parking, and wait time are excluded.
+- Enriches missing city and category data from matched Google Places or Yelp records when available.
+- Resets the review-evidence cache so enriched location and category data loads immediately.
+- Reset browser and service-worker asset versions to v1.9.5.
+
 ## v1.9.4 Route Timing and Skip Fallbacks
 
 - Fixed Road Ahead wait-time estimates using actual `minutesAhead` values from the live route instead of multiplying candidate sequence gaps by 42 minutes.

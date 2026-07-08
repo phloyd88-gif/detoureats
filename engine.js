@@ -1,4 +1,4 @@
-/* DetourEats v1.9.4 Review-Backed Scoring Engine
+/* DetourEats v1.9.5 Review-Backed Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"

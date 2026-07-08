@@ -1,18 +1,18 @@
-const CACHE_NAME = "detoureats-v1-9-4-route-timing-fallback";
+const CACHE_NAME = "detoureats-v1-9-5-food-focus-location";
 
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=1.9.4",
-  "./data.js?v=1.9.4",
-  "./engine.js?v=1.9.4",
-  "./review-evidence.js?v=1.9.4",
-  "./place-status.js?v=1.9.4",
-  "./live-route.js?v=1.9.4",
-  "./address-search.js?v=1.9.4",
-  "./restaurant-intelligence.js?v=1.9.4",
-  "./app.js?v=1.9.4",
-  "./manifest.webmanifest?v=1.9.4",
+  "./styles.css?v=1.9.5",
+  "./data.js?v=1.9.5",
+  "./engine.js?v=1.9.5",
+  "./review-evidence.js?v=1.9.5",
+  "./place-status.js?v=1.9.5",
+  "./live-route.js?v=1.9.5",
+  "./address-search.js?v=1.9.5",
+  "./restaurant-intelligence.js?v=1.9.5",
+  "./app.js?v=1.9.5",
+  "./manifest.webmanifest?v=1.9.5",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
 ];

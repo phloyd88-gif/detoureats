@@ -1,4 +1,4 @@
-/* DetourEats v1.9.4 review-backed evidence API */
+/* DetourEats v1.9.5 review-backed evidence API */
 const MAX_CANDIDATES = 5;
 const TIMEOUT_MS = 7500;
 let redditToken = { value: "", expiresAt: 0 };
@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
     const configured = configuredProviders();
     if (!configured.length) {
       return end(res, 200, {
-        version: "1.9.4",
+        version: "1.9.5",
         status: "not_configured",
         configuredProviders: [],
         results: candidates.map(c => ({ key: c.key, status: "not_configured" }))
@@ -29,7 +29,7 @@ module.exports = async function handler(req, res) {
 
     const results = [];
     for (const candidate of candidates) results.push(await evidenceFor(candidate, configured));
-    return end(res, 200, { version: "1.9.4", status: "ok", configuredProviders: configured, results });
+    return end(res, 200, { version: "1.9.5", status: "ok", configuredProviders: configured, results });
   } catch (error) {
     console.error("restaurant-evidence", error);
     return end(res, 500, { error: "evidence_failed", message: "Live restaurant evidence could not be loaded." });
@@ -83,7 +83,7 @@ async function googleEvidence(candidate) {
     body.locationBias = { circle: { center: { latitude: candidate.coordinates[1], longitude: candidate.coordinates[0] }, radius: 5000 } };
   }
   const fields = [
-    "places.id", "places.displayName", "places.formattedAddress", "places.location",
+    "places.id", "places.displayName", "places.formattedAddress", "places.addressComponents", "places.location",
     "places.rating", "places.userRatingCount", "places.reviews", "places.businessStatus",
     "places.googleMapsUri", "places.primaryType", "places.websiteUri"
   ].join(",");
@@ -105,6 +105,8 @@ async function googleEvidence(candidate) {
   return {
     provider: "google",
     businessName: p.displayName?.text || candidate.name,
+    address: p.formattedAddress || "",
+    city: googleLocality(p.addressComponents || []),
     rating: numberOrNull(p.rating),
     reviewCount: Number(p.userRatingCount || 0),
     businessStatus: String(p.businessStatus || ""),
@@ -162,6 +164,8 @@ async function yelpEvidence(candidate) {
   return {
     provider: "yelp",
     businessName: b.name || candidate.name,
+    address: b.location?.display_address?.join(", ") || "",
+    city: [b.location?.city, b.location?.state].filter(Boolean).join(", "),
     rating: numberOrNull(b.rating),
     reviewCount: Number(b.review_count || 0),
     isClosed: Boolean(b.is_closed),
@@ -178,7 +182,7 @@ async function redditEvidence(candidate) {
   if (!token) return null;
   const headers = {
     Authorization: `Bearer ${token}`,
-    "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.4 (restaurant evidence)"
+    "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.5 (restaurant evidence)"
   };
   const query = [`\"${candidate.name}\"`, candidate.city ? `\"${candidate.city}\"` : "", "(food OR restaurant OR cafe OR coffee OR pizza OR burger)"].filter(Boolean).join(" ");
   const params = new URLSearchParams({ q: query, sort: "relevance", t: "all", limit: "8", type: "link", raw_json: "1" });
@@ -210,7 +214,7 @@ async function redditEvidence(candidate) {
     } catch {}
   }
   return {
-    provider: "reddit", businessName: candidate.name, rating: null,
+    provider: "reddit", businessName: candidate.name, address: candidate.address || "", city: candidate.city || "", rating: null,
     reviewCount: reviews.length, isClosed: false,
     url: posts[0]?.permalink ? `https://www.reddit.com${posts[0].permalink}` : "",
     categories: ["Forum discussion"], reviews: reviews.slice(0, 20)
@@ -227,7 +231,7 @@ async function redditAccessToken() {
     headers: {
       Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.4 (restaurant evidence)"
+      "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.5 (restaurant evidence)"
     },
     body: "grant_type=client_credentials"
   });
@@ -269,10 +273,17 @@ function scoreEvidence(candidate, sources) {
   const sourceSummaries = sources.map(s => ({
     provider: s.provider, rating: s.rating, reviewCount: Number(s.reviewCount || 0), url: s.url || "",
     reviewAccess: s.reviewAccess || (s.reviews?.length ? "snippets" : "rating_only"),
-    businessStatus: s.businessStatus || "", isClosed: Boolean(s.isClosed)
+    businessStatus: s.businessStatus || "", isClosed: Boolean(s.isClosed),
+    categories: Array.isArray(s.categories) ? s.categories : []
   }));
+  const matchedCity = sources.map(s => String(s.city || "").trim()).find(Boolean) || candidate.city || "";
+  const matchedAddress = sources.map(s => String(s.address || "").trim()).find(Boolean) || candidate.address || "";
+  const categories = [...new Set(sources.flatMap(s => Array.isArray(s.categories) ? s.categories : []).filter(Boolean))].slice(0, 8);
   return {
     restaurant: { requestedName: candidate.name, matchedNames: sources.map(s => s.businessName).filter(Boolean) },
+    matchedCity,
+    matchedAddress,
+    categories,
     foodScore: Math.round(foodScore), confidenceScore,
     confidenceLabel: confidenceScore >= 88 ? "High" : confidenceScore >= 68 ? "Moderate" : "Limited",
     totalReviewCount, sourceCount: sources.length, reviewSnippetCount: snippets.length,
@@ -436,6 +447,17 @@ function nameAppears(name, text) {
   const tokens = normalize(name).split(" ").filter(t => t.length >= 3);
   const h = normalize(text);
   return tokens.length && tokens.filter(t => h.includes(t)).length >= Math.max(1, Math.ceil(tokens.length * .7));
+}
+
+function googleLocality(components) {
+  const find = type => (components || []).find(component =>
+    Array.isArray(component?.types) && component.types.includes(type)
+  )?.longText || "";
+  const locality = find("locality") || find("postal_town") || find("administrative_area_level_3") || find("administrative_area_level_2");
+  const state = (components || []).find(component =>
+    Array.isArray(component?.types) && component.types.includes("administrative_area_level_1")
+  )?.shortText || "";
+  return [locality, state].filter(Boolean).join(", ");
 }
 
 function configuredProviders() {
