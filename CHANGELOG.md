@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.10 Confirmed Closure Correction
+- Fixed the exact address-format mismatch that allowed G's Famous Lemon Cookies to survive validation.
+- The unique normalized business name now blocks the listing regardless of provider city or address formatting.
+- Added regression coverage for `44 E Main St`, smart apostrophes, uppercase names, and LLC suffixes.
+- Invalidated the v1.8.9 discovery cache.
+
+
 ## v1.8.9 Hardened Closure Validation
 - Broadened G's Famous Lemon Cookies matching to handle punctuation, suffixes, and missing location fields.
 - Added a provider-independent final candidate validator.

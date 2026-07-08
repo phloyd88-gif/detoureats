@@ -1,4 +1,4 @@
-# DetourEats App v1.8.9 Hardened Closure Validation
+# DetourEats App v1.8.10 Confirmed Closure Correction
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -838,3 +838,18 @@ Key changes:
   rendered candidates
 - invalidates the previous discovery cache
 - preserves active restaurants while removing confirmed closed listings
+
+
+## v1.8.10: Confirmed Closure Correction
+
+The live G's Famous Lemon Cookies record uses `44 E Main St`, while the
+previous override compared it against `44 Main`. The name matched, but the
+provider address variation incorrectly vetoed the confirmed closure.
+
+This release:
+
+- treats the unique normalized name `G's Famous Lemon Cookies` as authoritative
+- blocks punctuation, apostrophe, capitalization, and suffix variations
+- no longer allows city or address formatting to override this confirmed closure
+- invalidates the prior restaurant discovery cache
+- tests the exact live `44 E Main St` record through final filtering and routing

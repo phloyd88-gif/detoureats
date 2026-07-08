@@ -1,4 +1,4 @@
-/* DetourEats v1.8.9 Hardened Closure Validation
+/* DetourEats v1.8.10 Confirmed Closure Correction
    No account or API token is required.
 
    Prototype services:
@@ -13,7 +13,7 @@
   "use strict";
 
   const GEOCODE_CACHE_KEY = "detoureats_geocode_cache_v2";
-  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v5";
+  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v6";
 
   const NOMINATIM_URL =
     "https://nominatim.openstreetmap.org/search";

@@ -1,4 +1,4 @@
-/* DetourEats v1.8.9 hardened business status validation */
+/* DetourEats v1.8.10 confirmed-closure correction */
 (function () {
   "use strict";
 
@@ -23,8 +23,9 @@
         "famous lemon cookies",
         "g s famous lemon cookies"
       ],
+      globalNameMatch: true,
       city: "amsterdam",
-      addressContains: "44 main",
+      addressContains: "44 e main",
       status: "closed",
       verifiedAt: "2026-07-08",
       reason:
@@ -302,6 +303,16 @@
 
         if (!nameMatches) {
           return false;
+        }
+
+        /*
+          Some business names are sufficiently unique that a confirmed
+          closure should not depend on inconsistent provider address
+          formatting. For those overrides, the normalized name match is
+          authoritative.
+        */
+        if (item.globalNameMatch) {
+          return true;
         }
 
         /*

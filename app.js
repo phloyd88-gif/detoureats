@@ -1,4 +1,4 @@
-/* DetourEats v1.8.9 Hardened Closure Validation
+/* DetourEats v1.8.10 Confirmed Closure Correction
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -3622,7 +3622,7 @@ function escapeHtml(value) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.8.9", {
+      .register("service-worker.js?v=1.8.10", {
         updateViaCache: "none"
       })
       .then(registration => {
