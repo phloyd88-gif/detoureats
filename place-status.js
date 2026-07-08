@@ -1,4 +1,4 @@
-/* DetourEats v1.8.11 routing failover and closure audit */
+/* DetourEats v1.8.12 restaurant identity and snapshot cleanup */
 (function () {
   "use strict";
 
@@ -46,6 +46,45 @@
         "Confirmed permanently closed restaurant formerly located at 32 East Main Street in Amsterdam, New York."
     }
   ];
+
+  const KNOWN_NAME_CORRECTIONS = [
+    {
+      match: "dair circus",
+      correctedName: "Dairy Circus"
+    }
+  ];
+
+  function applyKnownNameCorrection(candidate) {
+    if (!candidate) return candidate;
+
+    const normalizedName =
+      normalizeRestaurantName(
+        candidate.name
+      );
+
+    const correction =
+      KNOWN_NAME_CORRECTIONS.find(
+        item =>
+          normalizedName ===
+          normalizeRestaurantName(
+            item.match
+          )
+      );
+
+    if (!correction) {
+      return candidate;
+    }
+
+    return {
+      ...candidate,
+      originalProviderName:
+        candidate.originalProviderName ||
+        candidate.name ||
+        "",
+      name:
+        correction.correctedName
+    };
+  }
 
   function assessCandidate(candidate) {
     const normalized = {
@@ -363,15 +402,21 @@
   }
 
   function validateCandidate(candidate) {
+    const correctedCandidate =
+      applyKnownNameCorrection(
+        candidate
+      );
     const assessment =
-      assessCandidate(candidate);
+      assessCandidate(
+        correctedCandidate
+      );
 
     if (assessment.blocked) {
       return null;
     }
 
     return {
-      ...candidate,
+      ...correctedCandidate,
       operationalStatus:
         assessment.status,
       operationalConfidence:
@@ -380,7 +425,8 @@
         assessment.reason,
       operationalLastChecked:
         assessment.lastCheckedAt ||
-        candidate?.operationalLastChecked ||
+        correctedCandidate
+          ?.operationalLastChecked ||
         "",
       operationalAgeDays:
         Number.isFinite(
@@ -388,16 +434,20 @@
         )
           ? Number(assessment.ageDays)
           : Number(
-              candidate?.operationalAgeDays ||
+              correctedCandidate
+                ?.operationalAgeDays ||
               99999
             ),
       operationalSignals:
         Number.isFinite(
           Number(assessment.signalCount)
         )
-          ? Number(assessment.signalCount)
+          ? Number(
+              assessment.signalCount
+            )
           : Number(
-              candidate?.operationalSignals ||
+              correctedCandidate
+                ?.operationalSignals ||
               0
             )
     };
@@ -729,6 +779,7 @@
 
   window.DetourEatsPlaceStatus = {
     assessCandidate,
+    applyKnownNameCorrection,
     validateCandidate,
     filterCandidates,
     assessOsmElement,

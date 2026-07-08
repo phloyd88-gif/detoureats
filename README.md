@@ -1,4 +1,4 @@
-# DetourEats App v1.8.11 Routing Provider Failover
+# DetourEats App v1.8.12 Restaurant Snapshot Cleanup
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -869,3 +869,14 @@ This release:
 - exposes the active routing provider in route metrics
 - blocks confirmed-closed Creek Stone in Amsterdam
 - invalidates the previous discovery cache
+
+
+## v1.8.12: Restaurant Snapshot Cleanup
+
+- Corrects `Dair Circus` to `Dairy Circus`.
+- Replaces raw map descriptions and company marketing copy with concise,
+  structured restaurant snapshots.
+- Keeps curated signature dishes and editorial summaries intact.
+- Documents that the internal `balanced` value is the visible
+  `Eating priority: Best overall` option.
+- Invalidates the previous restaurant discovery cache.

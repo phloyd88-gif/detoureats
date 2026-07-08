@@ -1,4 +1,4 @@
-/* DetourEats v1.8.5 restaurant intelligence
+/* DetourEats v1.8.12 restaurant intelligence
    This module uses only information already available to the prototype:
    curated restaurant records, OpenStreetMap metadata, route calculations,
    user feedback, and field-test reports.
@@ -10,7 +10,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "1.8-beta";
+  const VERSION = "1.8.12-beta";
   const FIELD_TEST_KEY = "detoureats_field_tests_v1";
   const ISSUE_REPORT_KEY = "detoureats_place_issues_v1";
   const LAST_SNAPSHOT_KEY = "detoureats_last_field_snapshot_v1";
@@ -382,6 +382,161 @@
     if (score >= 78) return "High";
     if (score >= 60) return "Moderate";
     return "Limited";
+  }
+
+  function buildRestaurantSnapshot(candidate) {
+    if (!candidate) {
+      return "Restaurant near the route.";
+    }
+
+    const isRouteDiscovered =
+      candidate.provenance ===
+        "route-discovered" ||
+      Boolean(
+        candidate.discoverySource
+      );
+
+    if (!isRouteDiscovered) {
+      const curated =
+        candidate.signatureDish ||
+        candidate.signatureItem ||
+        candidate.famousFor ||
+        candidate.tagline ||
+        candidate.summary ||
+        candidate.evidenceSummary ||
+        "";
+
+      if (curated) {
+        return conciseSentence(
+          curated,
+          125
+        );
+      }
+    }
+
+    const name =
+      String(candidate.name || "");
+    const cuisine =
+      cleanCategory(
+        candidate.cuisine
+      );
+    const category =
+      cleanCategory(
+        candidate.category
+      );
+    const amenity =
+      normalizeText(
+        candidate.amenity
+      );
+
+    const coffeeSignal =
+      [
+        name,
+        cuisine,
+        category,
+        amenity
+      ].some(value =>
+        /\b(coffee|cafe|café)\b/i.test(
+          String(value || "")
+        )
+      );
+
+    if (coffeeSignal) {
+      return "Coffee shop and café near the route.";
+    }
+
+    const cuisineLabel =
+      cuisine &&
+      !isGenericRestaurantType(
+        cuisine
+      )
+        ? cuisine
+        : category &&
+          !isGenericRestaurantType(
+            category
+          )
+          ? category
+          : "";
+
+    const quick =
+      candidate.quickStop ||
+      amenity === "fast food" ||
+      amenity === "fast_food";
+
+    if (quick) {
+      return cuisineLabel
+        ? `${cuisineLabel} quick-service stop near the route.`
+        : "Quick-service food stop near the route.";
+    }
+
+    if (
+      candidate.sitDown ||
+      amenity === "restaurant"
+    ) {
+      return cuisineLabel
+        ? `${cuisineLabel} sit-down restaurant near the route.`
+        : "Sit-down restaurant near the route.";
+    }
+
+    return cuisineLabel
+      ? `${cuisineLabel} food stop near the route.`
+      : "Restaurant near the route.";
+  }
+
+  function cleanCategory(value) {
+    return String(value || "")
+      .replaceAll("_", " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function isGenericRestaurantType(value) {
+    return [
+      "restaurant",
+      "cafe",
+      "café",
+      "fast food",
+      "quick service",
+      "food"
+    ].includes(
+      normalizeText(value)
+    );
+  }
+
+  function conciseSentence(value, limit) {
+    const text =
+      String(value || "")
+        .replace(/<[^>]*>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    if (!text) {
+      return "Restaurant near the route.";
+    }
+
+    const firstSentence =
+      text.match(
+        /^.*?[.!?](?:\s|$)/
+      )?.[0]?.trim() ||
+      text;
+
+    if (
+      firstSentence.length <= limit
+    ) {
+      return /[.!?]$/.test(
+        firstSentence
+      )
+        ? firstSentence
+        : `${firstSentence}.`;
+    }
+
+    const shortened =
+      firstSentence
+        .slice(0, limit)
+        .replace(/\s+\S*$/, "")
+        .trim();
+
+    return `${shortened}…`;
   }
 
   function buildWhySpecial(candidate, level) {
@@ -1167,6 +1322,7 @@
     getProviderStatus,
     enrichCandidate,
     enrichCandidates,
+    buildRestaurantSnapshot,
     assessHours,
     buildCandidateAudit,
     recordSnapshot,

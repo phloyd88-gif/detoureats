@@ -1,4 +1,4 @@
-/* DetourEats v1.8.11 Routing Provider Failover
+/* DetourEats v1.8.12 Restaurant Snapshot Cleanup
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -312,7 +312,18 @@ function normalizePick(rawPick) {
     10;
 
   const name = rawPick.name ?? rawPick.restaurant ?? "Recommended Stop";
-  const signature = rawPick.signatureDish ?? rawPick.famousFor ?? rawPick.tagline ?? rawPick.summary ?? rawPick.evidenceSummary ?? "Local food worth considering.";
+  const signature =
+    window.DetourEatsRestaurantIntelligence
+      ?.buildRestaurantSnapshot?.(
+        rawPick
+      ) ||
+    rawPick.signatureDish ||
+    rawPick.signatureItem ||
+    rawPick.famousFor ||
+    rawPick.tagline ||
+    rawPick.summary ||
+    rawPick.evidenceSummary ||
+    "Restaurant near the route.";
   const arrival = rawPick.arrivalTime ?? rawPick.arrivalClock ?? rawPick.eta ?? estimateArrival(rawPick);
   const open =
     rawPick.hoursConfidence === "unknown" ||
@@ -3622,7 +3633,7 @@ function escapeHtml(value) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.8.11", {
+      .register("service-worker.js?v=1.8.12", {
         updateViaCache: "none"
       })
       .then(registration => {

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.8.12 Restaurant Snapshot Cleanup
+- Corrected `Dair Circus` to `Dairy Circus` across all candidate paths.
+- Replaced raw company descriptions with concise structured restaurant snapshots.
+- Preserved curated signature-dish and editorial summaries.
+- Documented that internal `balanced` mode corresponds to the visible `Best overall` eating priority.
+- Invalidated the previous discovery cache.
+
+
 ## v1.8.11 Routing Provider Failover
 - Added automatic routing failover from Project OSRM to FOSSGIS OpenStreetMap Routing.
 - Reuses the provider that successfully returned the baseline route for later route calculations.
