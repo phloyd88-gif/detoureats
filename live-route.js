@@ -1,4 +1,4 @@
-/* DetourEats v1.8.8 Unified Closure Validation
+/* DetourEats v1.8.9 Hardened Closure Validation
    No account or API token is required.
 
    Prototype services:
@@ -13,7 +13,7 @@
   "use strict";
 
   const GEOCODE_CACHE_KEY = "detoureats_geocode_cache_v2";
-  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v4";
+  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v5";
 
   const NOMINATIM_URL =
     "https://nominatim.openstreetmap.org/search";
@@ -91,6 +91,22 @@
     } catch {
       // Prototype continues without browser caching.
     }
+  }
+
+
+  function filterOperationalCandidates(
+    candidates
+  ) {
+    const service =
+      window.DetourEatsPlaceStatus;
+
+    if (service?.filterCandidates) {
+      return service.filterCandidates(
+        candidates || []
+      );
+    }
+
+    return candidates || [];
   }
 
   async function fetchJson(url, options = {}, timeoutMs = 15000) {
@@ -304,7 +320,12 @@
   ) {
     const prepared = [];
 
-    for (const candidate of candidates || []) {
+    for (
+      const candidate of
+      filterOperationalCandidates(
+        candidates || []
+      )
+    ) {
       if (!Array.isArray(candidate.coordinates)) continue;
 
       const projection = projectPointToRoute(
@@ -531,9 +552,11 @@
 
     const mergedCandidates =
       selectCandidatesForRouting(
-        mergeCandidates(
-          relevantCurated,
-          discovery.candidates
+        filterOperationalCandidates(
+          mergeCandidates(
+            relevantCurated,
+            discovery.candidates
+          )
         )
       );
 
@@ -675,9 +698,11 @@
         session.routeContext = routeContext;
         session.candidates =
           selectCandidatesForRouting(
-            mergeCandidates(
-              curated,
-              discovery.candidates
+            filterOperationalCandidates(
+              mergeCandidates(
+                curated,
+                discovery.candidates
+              )
             )
           );
         session.discoveryStatus =
@@ -709,6 +734,15 @@
     }
 
     assertBuildActive(buildGeneration);
+
+    /*
+      Revalidate even when restaurant rediscovery did not run. This removes
+      stale candidates already held in an active trip session.
+    */
+    session.candidates =
+      filterOperationalCandidates(
+        session.candidates || []
+      );
 
     const routing =
       await screenAndRouteCandidates({
@@ -757,7 +791,9 @@
     );
 
     const liveCandidates =
-      routing.candidates;
+      filterOperationalCandidates(
+        routing.candidates
+      );
 
     const routedDiscovered =
       liveCandidates.filter(
@@ -991,7 +1027,9 @@
   }) {
     const sourceCandidates =
       selectCandidatesForRouting(
-        session.candidates || []
+        filterOperationalCandidates(
+          session.candidates || []
+        )
       ).slice(0, MAX_TABLE_CANDIDATES);
 
     if (!sourceCandidates.length) {

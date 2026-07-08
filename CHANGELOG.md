@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.8.9 Hardened Closure Validation
+- Broadened G's Famous Lemon Cookies matching to handle punctuation, suffixes, and missing location fields.
+- Added a provider-independent final candidate validator.
+- Applies closure filtering to curated, discovered, merged, active-session, route-screened, snapshot, and rendered candidates.
+- Invalidated the previous restaurant discovery cache.
+- Added regression coverage for provider name variants and missing city/address data.
+
+
 ## v1.8.8 Unified Closure Validation
 - Blocked G's Famous Lemon Cookies at 44 Main Street in Amsterdam as permanently closed.
 - Fixed the short-route Nominatim fallback bypassing known business-status overrides.

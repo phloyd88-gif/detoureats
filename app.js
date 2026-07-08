@@ -1,4 +1,4 @@
-/* DetourEats v1.8.8 Unified Closure Validation
+/* DetourEats v1.8.9 Hardened Closure Validation
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -170,19 +170,30 @@ function getCandidates() {
       ? state.liveCandidates
       : [];
 
+  /*
+    Final UI-layer defense: no candidate is rendered until it passes the
+    provider-independent business-status filter.
+  */
+  const validated =
+    window.DetourEatsPlaceStatus
+      ?.filterCandidates
+      ? window.DetourEatsPlaceStatus
+          .filterCandidates(candidates)
+      : candidates;
+
   const intelligence =
     window.DetourEatsRestaurantIntelligence;
 
   return intelligence?.enrichCandidates
     ? intelligence.enrichCandidates(
-        candidates,
+        validated,
         {
           now: Date.now(),
           routeMode:
             state.routingMode
         }
       )
-    : candidates;
+    : validated;
 }
 
 function getEngineResult() {
@@ -3611,7 +3622,7 @@ function escapeHtml(value) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.8.8", {
+      .register("service-worker.js?v=1.8.9", {
         updateViaCache: "none"
       })
       .then(registration => {

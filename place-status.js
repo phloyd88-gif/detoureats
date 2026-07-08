@@ -1,4 +1,4 @@
-/* DetourEats v1.8.8 unified business status validation */
+/* DetourEats v1.8.9 hardened business status validation */
 (function () {
   "use strict";
 
@@ -19,6 +19,10 @@
     },
     {
       name: "g s famous lemon cookies",
+      nameContains: [
+        "famous lemon cookies",
+        "g s famous lemon cookies"
+      ],
       city: "amsterdam",
       addressContains: "44 main",
       status: "closed",
@@ -283,15 +287,32 @@
 
     return (
       KNOWN_STATUS_OVERRIDES.find(item => {
-        if (
-          name !==
-          normalizeRestaurantName(item.name)
-        ) {
+        const exactName =
+          normalizeRestaurantName(item.name);
+        const containsNames =
+          (item.nameContains || [])
+            .map(normalizeRestaurantName)
+            .filter(Boolean);
+
+        const nameMatches =
+          name === exactName ||
+          containsNames.some(fragment =>
+            name.includes(fragment)
+          );
+
+        if (!nameMatches) {
           return false;
         }
 
+        /*
+          Provider records frequently omit city or address fields.
+          Use those fields to reject a conflicting location when present,
+          but do not allow a missing field to bypass a uniquely named
+          confirmed closure.
+        */
         if (
           item.city &&
+          city &&
           !city.includes(
             normalizeText(item.city)
           )
@@ -314,6 +335,53 @@
         return true;
       }) || null
     );
+  }
+
+  function validateCandidate(candidate) {
+    const assessment =
+      assessCandidate(candidate);
+
+    if (assessment.blocked) {
+      return null;
+    }
+
+    return {
+      ...candidate,
+      operationalStatus:
+        assessment.status,
+      operationalConfidence:
+        assessment.confidence,
+      operationalReason:
+        assessment.reason,
+      operationalLastChecked:
+        assessment.lastCheckedAt ||
+        candidate?.operationalLastChecked ||
+        "",
+      operationalAgeDays:
+        Number.isFinite(
+          Number(assessment.ageDays)
+        )
+          ? Number(assessment.ageDays)
+          : Number(
+              candidate?.operationalAgeDays ||
+              99999
+            ),
+      operationalSignals:
+        Number.isFinite(
+          Number(assessment.signalCount)
+        )
+          ? Number(assessment.signalCount)
+          : Number(
+              candidate?.operationalSignals ||
+              0
+            )
+    };
+  }
+
+  function filterCandidates(candidates) {
+    return (candidates || [])
+      .map(validateCandidate)
+      .filter(Boolean);
   }
 
   function getClosedLifecycleReason(tags) {
@@ -636,6 +704,8 @@
 
   window.DetourEatsPlaceStatus = {
     assessCandidate,
+    validateCandidate,
+    filterCandidates,
     assessOsmElement,
     matchKnownStatusOverride,
     suppressCandidate,

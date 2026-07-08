@@ -1,4 +1,4 @@
-# DetourEats App v1.8.8 Unified Closure Validation
+# DetourEats App v1.8.9 Hardened Closure Validation
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -822,3 +822,19 @@ This release:
   to fallback candidates
 - preserves conservative operational-confidence fields after validation
 - cache-busts every deployed application asset to v1.8.8
+
+
+## v1.8.9: Hardened Closure Validation
+
+This release closes the remaining path that allowed confirmed closed businesses
+to survive when provider records used a name variation, omitted the city, or
+were already present in an active candidate session.
+
+Key changes:
+
+- matches unique confirmed-closure name fragments, including provider suffixes
+- missing provider city or address data no longer bypasses a confirmed closure
+- filters curated, discovered, merged, session, route-screened, snapshot, and
+  rendered candidates
+- invalidates the previous discovery cache
+- preserves active restaurants while removing confirmed closed listings
