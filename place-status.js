@@ -1,4 +1,4 @@
-/* DetourEats v1.8.10 confirmed-closure correction */
+/* DetourEats v1.8.11 routing failover and closure audit */
 (function () {
   "use strict";
 
@@ -29,7 +29,21 @@
       status: "closed",
       verifiedAt: "2026-07-08",
       reason:
-        "Confirmed permanently closed bakery listing at 44 Main Street in Amsterdam, New York."
+        "Confirmed permanently closed bakery listing at 44 East Main Street in Amsterdam, New York."
+    },
+    {
+      name: "creek stone",
+      nameContains: [
+        "creek stone",
+        "creekstone"
+      ],
+      globalNameMatch: true,
+      city: "amsterdam",
+      addressContains: "32 e main",
+      status: "closed",
+      verifiedAt: "2026-07-08",
+      reason:
+        "Confirmed permanently closed restaurant formerly located at 32 East Main Street in Amsterdam, New York."
     }
   ];
 

@@ -1,4 +1,4 @@
-# DetourEats App v1.8.10 Confirmed Closure Correction
+# DetourEats App v1.8.11 Routing Provider Failover
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -853,3 +853,19 @@ This release:
 - no longer allows city or address formatting to override this confirmed closure
 - invalidates the prior restaurant discovery cache
 - tests the exact live `44 E Main St` record through final filtering and routing
+
+
+## v1.8.11: Routing Provider Failover
+
+The app previously depended on a single public OSRM endpoint. When that
+endpoint was offline or overloaded, valid selected locations produced a
+generic route-verification failure.
+
+This release:
+
+- adds automatic failover from Project OSRM to FOSSGIS OpenStreetMap Routing
+- remembers the successful provider for subsequent matrix and exact-route calls
+- distinguishes routing-provider outages from invalid locations
+- exposes the active routing provider in route metrics
+- blocks confirmed-closed Creek Stone in Amsterdam
+- invalidates the previous discovery cache

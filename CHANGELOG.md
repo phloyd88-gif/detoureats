@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.8.11 Routing Provider Failover
+- Added automatic routing failover from Project OSRM to FOSSGIS OpenStreetMap Routing.
+- Reuses the provider that successfully returned the baseline route for later route calculations.
+- Replaced the generic location error with a specific temporary routing-service outage message.
+- Added Creek Stone in Amsterdam to confirmed closed-business overrides.
+- Invalidated the prior restaurant discovery cache.
+
+
 ## v1.8.10 Confirmed Closure Correction
 - Fixed the exact address-format mismatch that allowed G's Famous Lemon Cookies to survive validation.
 - The unique normalized business name now blocks the listing regardless of provider city or address formatting.

@@ -1,4 +1,4 @@
-/* DetourEats v1.8.10 Confirmed Closure Correction
+/* DetourEats v1.8.11 Routing Provider Failover
    No account or API token is required.
 
    Prototype services:
@@ -13,14 +13,32 @@
   "use strict";
 
   const GEOCODE_CACHE_KEY = "detoureats_geocode_cache_v2";
-  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v6";
+  const DISCOVERY_CACHE_KEY = "detoureats_discovery_cache_v7";
 
   const NOMINATIM_URL =
     "https://nominatim.openstreetmap.org/search";
-  const OSRM_ROUTE_URL =
-    "https://router.project-osrm.org/route/v1/driving";
-  const OSRM_TABLE_URL =
-    "https://router.project-osrm.org/table/v1/driving";
+  const ROUTING_PROVIDERS = [
+    {
+      id: "project-osrm",
+      label: "Project OSRM",
+      routeUrl:
+        "https://router.project-osrm.org/route/v1/driving",
+      tableUrl:
+        "https://router.project-osrm.org/table/v1/driving"
+    },
+    {
+      id: "fossgis-osrm",
+      label: "FOSSGIS OpenStreetMap Routing",
+      routeUrl:
+        "https://routing.openstreetmap.de/routed-car/route/v1/driving",
+      tableUrl:
+        "https://routing.openstreetmap.de/routed-car/table/v1/driving"
+    }
+  ];
+
+  let preferredRoutingProviderIndex = 0;
+  let lastRoutingProviderLabel =
+    ROUTING_PROVIDERS[0].label;
   const OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
@@ -170,6 +188,104 @@
     }
   }
 
+
+  function getRoutingProviderOrder() {
+    const indexes = ROUTING_PROVIDERS.map(
+      (_, index) => index
+    );
+
+    if (
+      preferredRoutingProviderIndex > 0 &&
+      preferredRoutingProviderIndex <
+        ROUTING_PROVIDERS.length
+    ) {
+      return [
+        preferredRoutingProviderIndex,
+        ...indexes.filter(
+          index =>
+            index !==
+            preferredRoutingProviderIndex
+        )
+      ];
+    }
+
+    return indexes;
+  }
+
+  async function fetchFromRoutingProviders({
+    serviceType,
+    coordinateString,
+    params,
+    timeoutMs
+  }) {
+    const errors = [];
+
+    for (
+      const providerIndex of
+      getRoutingProviderOrder()
+    ) {
+      const provider =
+        ROUTING_PROVIDERS[
+          providerIndex
+        ];
+      const baseUrl =
+        serviceType === "table"
+          ? provider.tableUrl
+          : provider.routeUrl;
+
+      try {
+        const data = await fetchJson(
+          `${baseUrl}/${coordinateString}?${params.toString()}`,
+          {},
+          timeoutMs
+        );
+
+        if (
+          data?.code &&
+          data.code !== "Ok"
+        ) {
+          throw new Error(
+            `${provider.label} returned ${data.code}.`
+          );
+        }
+
+        preferredRoutingProviderIndex =
+          providerIndex;
+        lastRoutingProviderLabel =
+          provider.label;
+
+        return {
+          data,
+          provider
+        };
+      } catch (error) {
+        if (
+          /Route check canceled/i.test(
+            error?.message || ""
+          )
+        ) {
+          throw error;
+        }
+
+        errors.push(
+          `${provider.label}: ${
+            error?.message ||
+            "request failed"
+          }`
+        );
+      }
+    }
+
+    console.warn(
+      "All routing providers failed:",
+      errors
+    );
+
+    throw new Error(
+      "The routing services are temporarily unavailable. Your selected locations are valid; please try again shortly."
+    );
+  }
+
   async function geocode(query, fallbackCoordinates = null) {
     const key = String(query || "").trim().toLowerCase();
     const cache = loadJsonStorage(GEOCODE_CACHE_KEY);
@@ -249,13 +365,23 @@
       geometries: "geojson"
     });
 
-    const data = await fetchJson(
-      `${OSRM_ROUTE_URL}/${coordinateString}?${params.toString()}`,
-      {},
-      Number(options.timeoutMs || BASELINE_ROUTE_TIMEOUT_MS)
-    );
+    const { data, provider } =
+      await fetchFromRoutingProviders({
+        serviceType: "route",
+        coordinateString,
+        params,
+        timeoutMs:
+          Number(
+            options.timeoutMs ||
+            BASELINE_ROUTE_TIMEOUT_MS
+          )
+      });
 
     const result = data?.routes?.[0];
+    if (result) {
+      result.routingProvider =
+        provider.label;
+    }
     if (!result) throw new Error("No drivable route was returned.");
     return result;
   }
@@ -295,11 +421,13 @@
       annotations: "duration,distance"
     });
 
-    const data = await fetchJson(
-      `${OSRM_TABLE_URL}/${coordinateString}?${params.toString()}`,
-      {},
-      timeoutMs
-    );
+    const { data } =
+      await fetchFromRoutingProviders({
+        serviceType: "table",
+        coordinateString,
+        params,
+        timeoutMs
+      });
 
     if (
       data?.code !== "Ok" ||
@@ -583,6 +711,9 @@
         Number(baseline.duration || 0),
       initialDistanceMeters:
         Number(baseline.distance || 0),
+      routingProvider:
+        baseline.routingProvider ||
+        lastRoutingProviderLabel,
       discoveryStatus:
         discovery.plan.status,
       discoveryPlan:
@@ -898,6 +1029,10 @@
           routing.exactRoutingStatus,
         searchOutcome,
         routeVerified: true,
+        routingProvider:
+          baseline.routingProvider ||
+          session.routingProvider ||
+          lastRoutingProviderLabel,
         restaurantSearchFailed:
           session.discoveryStatus ===
           "unavailable",

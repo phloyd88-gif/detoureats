@@ -1,17 +1,17 @@
-const CACHE_NAME = "detoureats-v1-8-10-confirmed-closure-correction";
+const CACHE_NAME = "detoureats-v1-8-11-routing-failover";
 
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=1.8.10",
-  "./data.js?v=1.8.10",
-  "./engine.js?v=1.8.10",
-  "./place-status.js?v=1.8.10",
-  "./live-route.js?v=1.8.10",
-  "./address-search.js?v=1.8.10",
-  "./restaurant-intelligence.js?v=1.8.10",
-  "./app.js?v=1.8.10",
-  "./manifest.webmanifest?v=1.8.10",
+  "./styles.css?v=1.8.11",
+  "./data.js?v=1.8.11",
+  "./engine.js?v=1.8.11",
+  "./place-status.js?v=1.8.11",
+  "./live-route.js?v=1.8.11",
+  "./address-search.js?v=1.8.11",
+  "./restaurant-intelligence.js?v=1.8.11",
+  "./app.js?v=1.8.11",
+  "./manifest.webmanifest?v=1.8.11",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
 ];

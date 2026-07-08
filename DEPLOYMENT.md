@@ -14,7 +14,7 @@ This package is a complete replacement for the current GitHub repository files.
 
 A successful deployment displays:
 
-`DetourEats v1.8.10`
+`DetourEats v1.8.11`
 
 If that version is not visible, the live site is still serving older files or
 the package was uploaded inside an extra folder.
@@ -40,6 +40,6 @@ the package was uploaded inside an extra folder.
 
 ## Cache handling
 
-This release changes every CSS and JavaScript reference to include `v=1.8.10`.
+This release changes every CSS and JavaScript reference to include `v=1.8.11`.
 Its service worker immediately activates, deletes older DetourEats caches, and
 checks the network before using cached app files.
