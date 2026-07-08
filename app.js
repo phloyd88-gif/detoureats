@@ -1,4 +1,4 @@
-/* DetourEats v1.9.5 Restaurant Identity and Food Focus
+/* DetourEats v1.9.6 Restaurant Identity and Food Focus
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -34,6 +34,29 @@ const els = {
   startTripButton: document.getElementById("startTripButton"),
   voiceToggleButton: document.getElementById("voiceToggleButton"),
   enableNotificationsButton: document.getElementById("enableNotificationsButton"),
+  installAppCard: document.getElementById("installAppCard"),
+  installAppTitle: document.getElementById("installAppTitle"),
+  installAppMessage: document.getElementById("installAppMessage"),
+  installAppButton: document.getElementById("installAppButton"),
+  dismissInstallButton: document.getElementById("dismissInstallButton"),
+  installHelpModal: document.getElementById("installHelpModal"),
+  installHelpTitle: document.getElementById("installHelpTitle"),
+  installHelpSteps: document.getElementById("installHelpSteps"),
+  closeInstallHelpButton: document.getElementById("closeInstallHelpButton"),
+  finishInstallHelpButton: document.getElementById("finishInstallHelpButton"),
+  connectionBanner: document.getElementById("connectionBanner"),
+  connectionBannerTitle: document.getElementById("connectionBannerTitle"),
+  connectionBannerMessage: document.getElementById("connectionBannerMessage"),
+  dismissConnectionBannerButton: document.getElementById("dismissConnectionBannerButton"),
+  readinessSummaryBadge: document.getElementById("readinessSummaryBadge"),
+  locationReadinessDot: document.getElementById("locationReadinessDot"),
+  locationReadinessStatus: document.getElementById("locationReadinessStatus"),
+  voiceReadinessDot: document.getElementById("voiceReadinessDot"),
+  voiceReadinessStatus: document.getElementById("voiceReadinessStatus"),
+  notificationReadinessDot: document.getElementById("notificationReadinessDot"),
+  notificationReadinessStatus: document.getElementById("notificationReadinessStatus"),
+  screenReadinessDot: document.getElementById("screenReadinessDot"),
+  screenReadinessStatus: document.getElementById("screenReadinessStatus"),
   backButton: document.getElementById("backButton"),
   tripTitle: document.getElementById("tripTitle"),
   tripSubtitle: document.getElementById("tripSubtitle"),
@@ -155,6 +178,8 @@ let state = {
   detailsOpen: false,
   notificationsEnabled: false,
   voiceEnabled: false,
+  installedApp: false,
+  wakeLockActive: false,
   announcedAlertKeys: new Set(),
   announcedExceptionalKeys: new Set(),
   dismissedExceptionalIds: new Set(),
@@ -2081,6 +2106,11 @@ const NOTIFICATION_PREFERENCE_KEY = "detoureats_notification_preference_v1";
 const NAVIGATION_PREFERENCE_KEY = "detoureats_navigation_preference_v1";
 const PENDING_VISIT_KEY = "detoureats_pending_visit_v1";
 const LEARNED_PREFERENCES_KEY = "detoureats_learned_preferences_v1";
+const INSTALL_DISMISSED_KEY = "detoureats_install_dismissed_v1";
+const INSTALL_DISMISS_DAYS = 14;
+let deferredInstallPrompt = null;
+let wakeLock = null;
+let connectionBannerDismissed = false;
 const MAX_RECENT_TRIPS = 5;
 const REMOVED_DEMO_TRIP_KEYS = new Set([
   "albany, ny|boston, ma",
@@ -2818,6 +2848,7 @@ async function startTrip() {
 
   els.setupScreen.classList.add("hidden");
   els.driveScreen.classList.remove("hidden");
+  requestDriveWakeLock().catch(() => {});
 
   if (state.locationIsOrigin) {
     startLocationWatch();
@@ -2893,6 +2924,7 @@ function getActualCurrentMinutes() {
 function goBack() {
   closeSkipPanel();
   stopLocationWatch();
+  releaseDriveWakeLock();
   state.started = false;
   state.routingMode = "idle";
   state.liveCandidates = null;
@@ -3308,6 +3340,7 @@ function updateLocationSetup(
     "Manual route";
   els.locationModeBadge.className =
     `location-mode-badge ${visualMode}`;
+  updateDriveReadiness();
 }
 
 function startLocationWatch() {
@@ -3444,11 +3477,11 @@ async function enableNotifications() {
   updateTripAlertStatus();
 
   if (state.notificationsEnabled) {
-    new Notification("DetourEats trip alerts are on", {
+    showSystemNotification("DetourEats trip alerts are on", {
       body: "We’ll alert you when a worthwhile food decision is approaching while DetourEats is active.",
-      icon: "icons/icon-192.svg"
-    });
-    showToast("Trip alerts enabled", "Approach alerts are ready.");
+      tag: "detoureats-alerts-enabled"
+    }).catch(() => {});
+    showToast("Trip alerts enabled", "Approach alerts are ready while DetourEats remains open.");
   } else {
     showToast("Alerts not enabled", "Voice guidance can still be used.");
   }
@@ -3594,21 +3627,16 @@ function maybeDeliverExceptionalAlert(opportunity) {
     state.notificationsEnabled &&
     Notification.permission === "granted"
   ) {
-    try {
-      new Notification(
-        stage === "decision"
-          ? "DetourEats: rare detour decision"
-          : "DetourEats: rare place ahead",
-        {
-          body: message,
-          icon: "icons/icon-192.svg",
-          tag: `exceptional-${key}`,
-          renotify: stage === "decision"
-        }
-      );
-    } catch {
-      // Some mobile browsers require service-worker notifications.
-    }
+    showSystemNotification(
+      stage === "decision"
+        ? "DetourEats: rare detour decision"
+        : "DetourEats: rare place ahead",
+      {
+        body: message,
+        tag: `exceptional-${key}`,
+        renotify: stage === "decision"
+      }
+    ).catch(() => {});
   }
 
   showToast(
@@ -3674,6 +3702,8 @@ function updateTripAlertStatus() {
     els.enableNotificationsButton.textContent =
       state.notificationsEnabled ? "Alerts Enabled" : "Enable Alerts";
   }
+
+  updateDriveReadiness();
 }
 
 function maybeDeliverApproachAlert(pick, result) {
@@ -3702,19 +3732,14 @@ function maybeDeliverApproachAlert(pick, result) {
   }
 
   if (state.notificationsEnabled && Notification.permission === "granted") {
-    try {
-      new Notification(
-        stage === "now" ? "DetourEats: decide now" : "DetourEats: stop approaching",
-        {
-          body: message,
-          icon: "icons/icon-192.svg",
-          tag: alertKey,
-          renotify: stage === "now"
-        }
-      );
-    } catch {
-      // Some mobile browsers require service-worker notifications.
-    }
+    showSystemNotification(
+      stage === "now" ? "DetourEats: decide now" : "DetourEats: stop approaching",
+      {
+        body: message,
+        tag: alertKey,
+        renotify: stage === "now"
+      }
+    ).catch(() => {});
   }
 
   if (stage === "now" || stage === "soon") {
@@ -4020,14 +4045,303 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function isStandaloneApp() {
+  return Boolean(
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    window.navigator.standalone === true
+  );
+}
+
+function isIOSDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent || "");
+}
+
+function isAndroidDevice() {
+  return /android/i.test(navigator.userAgent || "");
+}
+
+function wasInstallRecentlyDismissed() {
+  try {
+    const dismissedAt = Number(localStorage.getItem(INSTALL_DISMISSED_KEY) || 0);
+    return dismissedAt > 0 && Date.now() - dismissedAt < INSTALL_DISMISS_DAYS * 86400000;
+  } catch {
+    return false;
+  }
+}
+
+function updateInstallExperience({ force = false } = {}) {
+  if (!els.installAppCard) return;
+
+  state.installedApp = isStandaloneApp();
+  document.documentElement.classList.toggle("installed-app", state.installedApp);
+
+  if (state.installedApp) {
+    els.installAppCard.classList.add("hidden");
+    return;
+  }
+
+  if (!force && wasInstallRecentlyDismissed() && !deferredInstallPrompt) {
+    els.installAppCard.classList.add("hidden");
+    return;
+  }
+
+  if (deferredInstallPrompt) {
+    els.installAppTitle.textContent = "Install DetourEats";
+    els.installAppMessage.textContent =
+      "Open DetourEats from your home screen with a full-screen, app-like experience.";
+    els.installAppButton.textContent = "Install App";
+    els.installAppCard.classList.remove("hidden");
+    return;
+  }
+
+  if (isIOSDevice()) {
+    els.installAppTitle.textContent = "Add DetourEats to iPhone";
+    els.installAppMessage.textContent =
+      "Use Safari’s Add to Home Screen option for a full-screen shortcut.";
+    els.installAppButton.textContent = "Show Me How";
+    els.installAppCard.classList.remove("hidden");
+    return;
+  }
+
+  if (isAndroidDevice()) {
+    els.installAppTitle.textContent = "Add DetourEats to Android";
+    els.installAppMessage.textContent =
+      "Install from Chrome’s menu if the automatic install prompt is not available.";
+    els.installAppButton.textContent = "Install Help";
+    els.installAppCard.classList.remove("hidden");
+    return;
+  }
+
+  els.installAppTitle.textContent = "Install DetourEats";
+  els.installAppMessage.textContent =
+    "Your browser may offer Install App or Add to Home Screen from its address bar or menu.";
+  els.installAppButton.textContent = "Install Help";
+  els.installAppCard.classList.remove("hidden");
+}
+
+async function installDetourEats() {
+  if (deferredInstallPrompt) {
+    const promptEvent = deferredInstallPrompt;
+    deferredInstallPrompt = null;
+    promptEvent.prompt();
+    const choice = await promptEvent.userChoice.catch(() => null);
+    if (choice?.outcome === "accepted") {
+      els.installAppCard?.classList.add("hidden");
+      showToast("DetourEats installed", "It is now available from your home screen or app launcher.");
+    } else {
+      updateInstallExperience({ force: true });
+    }
+    return;
+  }
+
+  openInstallHelp();
+}
+
+function openInstallHelp() {
+  if (!els.installHelpModal || !els.installHelpSteps) return;
+
+  if (isIOSDevice()) {
+    els.installHelpTitle.textContent = "Install on iPhone or iPad";
+    els.installHelpSteps.innerHTML = `
+      <ol>
+        <li>Open DetourEats in <strong>Safari</strong>.</li>
+        <li>Tap the <strong>Share</strong> button.</li>
+        <li>Scroll and choose <strong>Add to Home Screen</strong>.</li>
+        <li>Tap <strong>Add</strong>.</li>
+      </ol>
+      <p>Apple requires this manual step; websites cannot trigger the iPhone install screen directly.</p>
+    `;
+  } else if (isAndroidDevice()) {
+    els.installHelpTitle.textContent = "Install on Android";
+    els.installHelpSteps.innerHTML = `
+      <ol>
+        <li>Open DetourEats in <strong>Chrome</strong>.</li>
+        <li>Tap Chrome’s <strong>three-dot menu</strong>.</li>
+        <li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+        <li>Confirm the installation.</li>
+      </ol>
+    `;
+  } else {
+    els.installHelpTitle.textContent = "Install from your browser";
+    els.installHelpSteps.innerHTML = `
+      <ol>
+        <li>Look for an <strong>Install</strong> icon in the address bar.</li>
+        <li>Or open the browser menu and choose <strong>Install DetourEats</strong> or <strong>Add to Home screen</strong>.</li>
+      </ol>
+      <p>Install availability depends on the browser and device.</p>
+    `;
+  }
+
+  els.installHelpModal.classList.remove("hidden");
+}
+
+function closeInstallHelp() {
+  els.installHelpModal?.classList.add("hidden");
+}
+
+function dismissInstallExperience() {
+  try {
+    localStorage.setItem(INSTALL_DISMISSED_KEY, String(Date.now()));
+  } catch {
+    // Dismissal remains for this page view.
+  }
+  els.installAppCard?.classList.add("hidden");
+}
+
+function updateConnectionStatus({ recovered = false } = {}) {
+  if (!els.connectionBanner) return;
+
+  if (!navigator.onLine) {
+    connectionBannerDismissed = false;
+    els.connectionBannerTitle.textContent = "You’re offline";
+    els.connectionBannerMessage.textContent =
+      "Saved screens may still open, but route checks and new restaurant results need an internet connection.";
+    els.connectionBanner.classList.remove("hidden", "online");
+    els.connectionBanner.classList.add("offline");
+    document.documentElement.classList.add("is-offline");
+    return;
+  }
+
+  document.documentElement.classList.remove("is-offline");
+  els.connectionBanner.classList.remove("offline");
+
+  if (recovered && !connectionBannerDismissed) {
+    els.connectionBannerTitle.textContent = "Back online";
+    els.connectionBannerMessage.textContent = "Live routing and restaurant checks are available again.";
+    els.connectionBanner.classList.add("online");
+    els.connectionBanner.classList.remove("hidden");
+    setTimeout(() => els.connectionBanner?.classList.add("hidden"), 3500);
+  } else {
+    els.connectionBanner.classList.add("hidden");
+  }
+}
+
+function setReadinessDot(dot, ready, partial = false) {
+  if (!dot) return;
+  dot.classList.toggle("ready", Boolean(ready));
+  dot.classList.toggle("partial", Boolean(partial && !ready));
+}
+
+function updateDriveReadiness() {
+  const locationReady = Boolean(state.locationIsOrigin && state.currentCoordinates);
+  const voiceReady = Boolean(state.voiceEnabled);
+  const alertsReady = Boolean(
+    state.notificationsEnabled &&
+    "Notification" in window &&
+    Notification.permission === "granted"
+  );
+  const wakeSupported = Boolean("wakeLock" in navigator);
+  const wakeActive = Boolean(state.wakeLockActive);
+
+  setReadinessDot(els.locationReadinessDot, locationReady, Boolean(navigator.geolocation));
+  setReadinessDot(els.voiceReadinessDot, voiceReady, "speechSynthesis" in window);
+  setReadinessDot(els.notificationReadinessDot, alertsReady, "Notification" in window);
+  setReadinessDot(els.screenReadinessDot, wakeActive, wakeSupported);
+
+  if (els.locationReadinessStatus) {
+    els.locationReadinessStatus.textContent = locationReady
+      ? "Live location is ready for progress updates."
+      : navigator.geolocation
+        ? "Optional: tap Use My Location for live progress updates."
+        : "This browser does not provide location access.";
+  }
+  if (els.voiceReadinessStatus) {
+    els.voiceReadinessStatus.textContent = voiceReady
+      ? "Spoken guidance is on."
+      : "Voice is off.";
+  }
+  if (els.notificationReadinessStatus) {
+    const denied = "Notification" in window && Notification.permission === "denied";
+    els.notificationReadinessStatus.textContent = alertsReady
+      ? "Approach alerts are enabled while DetourEats is open."
+      : denied
+        ? "Alerts are blocked in browser settings."
+        : "Browser alerts are off.";
+  }
+  if (els.screenReadinessStatus) {
+    els.screenReadinessStatus.textContent = wakeActive
+      ? "Screen-awake mode is active for this drive."
+      : wakeSupported
+        ? "The screen can be kept awake after you start the trip. Keep DetourEats open."
+        : "Keep DetourEats open and the screen unlocked for reliable web-beta updates.";
+  }
+
+  if (els.readinessSummaryBadge) {
+    const readyCount = [locationReady, voiceReady, alertsReady].filter(Boolean).length;
+    els.readinessSummaryBadge.textContent = readyCount >= 2 ? "Drive ready" : "Optional setup";
+    els.readinessSummaryBadge.classList.toggle("ready", readyCount >= 2);
+  }
+}
+
+async function requestDriveWakeLock() {
+  if (!state.started || document.visibilityState !== "visible" || !("wakeLock" in navigator)) {
+    updateDriveReadiness();
+    return;
+  }
+
+  try {
+    if (wakeLock) return;
+    wakeLock = await navigator.wakeLock.request("screen");
+    state.wakeLockActive = true;
+    wakeLock.addEventListener("release", () => {
+      wakeLock = null;
+      state.wakeLockActive = false;
+      updateDriveReadiness();
+    });
+  } catch {
+    wakeLock = null;
+    state.wakeLockActive = false;
+  }
+  updateDriveReadiness();
+}
+
+function releaseDriveWakeLock() {
+  const activeLock = wakeLock;
+  wakeLock = null;
+  state.wakeLockActive = false;
+  if (activeLock?.release) activeLock.release().catch(() => {});
+  updateDriveReadiness();
+}
+
+async function showSystemNotification(title, options = {}) {
+  const notificationOptions = {
+    icon: "icons/icon-192.png",
+    badge: "icons/icon-192.png",
+    ...options
+  };
+
+  if ("serviceWorker" in navigator) {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification(title, notificationOptions);
+      return;
+    } catch {
+      // Fall through to the page notification API.
+    }
+  }
+
+  if ("Notification" in window && Notification.permission === "granted") {
+    new Notification(title, notificationOptions);
+  }
+}
+
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.9.5", {
+      .register("service-worker.js?v=1.9.6", {
         updateViaCache: "none"
       })
       .then(registration => {
         registration.update().catch(() => {});
+        registration.addEventListener("updatefound", () => {
+          const worker = registration.installing;
+          if (!worker) return;
+          worker.addEventListener("statechange", () => {
+            if (worker.state === "installed" && navigator.serviceWorker.controller) {
+              showToast("Update ready", "Reload DetourEats to use the newest version.");
+            }
+          });
+        });
       })
       .catch(() => {});
   }
@@ -4080,6 +4394,31 @@ const destinationAutocomplete = window.DetourEatsAddressSearch?.createAutocomple
       state.destinationSelection = null;
     }
   }
+});
+
+window.addEventListener("beforeinstallprompt", event => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  updateInstallExperience({ force: true });
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  state.installedApp = true;
+  els.installAppCard?.classList.add("hidden");
+  showToast("DetourEats installed", "Open it from your home screen or app launcher.");
+});
+window.addEventListener("online", () => updateConnectionStatus({ recovered: true }));
+window.addEventListener("offline", () => updateConnectionStatus());
+els.dismissConnectionBannerButton?.addEventListener("click", () => {
+  connectionBannerDismissed = true;
+  els.connectionBanner?.classList.add("hidden");
+});
+els.installAppButton?.addEventListener("click", () => installDetourEats().catch(() => openInstallHelp()));
+els.dismissInstallButton?.addEventListener("click", dismissInstallExperience);
+els.closeInstallHelpButton?.addEventListener("click", closeInstallHelp);
+els.finishInstallHelpButton?.addEventListener("click", closeInstallHelp);
+els.installHelpModal?.addEventListener("click", event => {
+  if (event.target === els.installHelpModal) closeInstallHelp();
 });
 
 els.startTripButton.addEventListener("click", startTrip);
@@ -4224,15 +4563,24 @@ els.enableNotificationsButton.addEventListener("click", enableNotifications);
   });
 });
 
-window.addEventListener("beforeunload", stopLocationWatch);
+window.addEventListener("beforeunload", () => {
+  stopLocationWatch();
+  releaseDriveWakeLock();
+});
 window.addEventListener("focus", maybePromptForStopFeedback);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     maybePromptForStopFeedback();
+    if (state.started) requestDriveWakeLock().catch(() => {});
+  } else {
+    releaseDriveWakeLock();
   }
 });
 loadPreferences();
 loadSeamlessSettings();
 renderRecentTrips();
 renderRoutePreview();
+updateInstallExperience();
+updateConnectionStatus();
+updateDriveReadiness();
 registerServiceWorker();

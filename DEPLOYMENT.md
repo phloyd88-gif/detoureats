@@ -14,7 +14,7 @@ This package is a complete replacement for the current GitHub repository files.
 
 A successful deployment displays:
 
-`DetourEats v1.9.5`
+`DetourEats v1.9.6`
 
 If that version is not visible, the live site is still serving older files or
 the package was uploaded inside an extra folder.
@@ -35,35 +35,42 @@ the package was uploaded inside an extra folder.
 - README.md
 - CHANGELOG.md
 - DEPLOYMENT.md
+- icons/icon-192.png
+- icons/icon-512.png
+- icons/icon-maskable-192.png
+- icons/icon-maskable-512.png
+- icons/apple-touch-icon.png
 - icons/icon-192.svg
 - icons/icon-512.svg
 
 ## Cache handling
 
-This release changes every CSS and JavaScript reference to include `v=1.9.5`.
+This release changes every CSS and JavaScript reference to include `v=1.9.6`.
 Its service worker immediately activates, deletes older DetourEats caches, and
 checks the network before using cached app files.
 
 
-## v1.9.5 serverless function
+## v1.9.6 serverless function
 
 The repository now includes `api/restaurant-evidence.js`. Vercel should detect it automatically as a Node.js Function while serving the static application from the repository root.
 
 After adding provider credentials in Vercel, redeploy production. Verify:
 
 - `/api/restaurant-evidence` returns `method_not_allowed` for a browser GET rather than a 404
-- the footer says `DetourEats v1.9.5`
+- the footer says `DetourEats v1.9.6`
 - a recommendation initially shows a provisional Food estimate and then updates to a review-backed Food score after evidence is returned
-## v1.9.5 display verification
 
-After deployment, run a route with several restaurant results and confirm:
+## v1.9.6 mobile verification
 
-1. The town or city appears directly beneath the active restaurant name.
-2. The card shows a clear **Known for** or **Food type** line.
-3. Google rating and count appear once on the main card, not again as a duplicate chip.
-4. Opening **Tell Me Why** still exposes provider source links.
-5. Road Ahead choices show both their location and food focus.
-6. The time card says **Added driving time** and clarifies that food, parking, and wait time are not included.
-7. Restaurants missing map locality data receive a city from connected provider evidence when available.
+After deployment:
 
-Also rerun the v1.9.4 skip checks: **Need something faster** must not return a slower match, **Wait for something better** must preserve a fallback, and **Skip and wait** must use actual route-time differences.
+1. Confirm the footer says **DetourEats v1.9.6**.
+2. Open the site on a phone and verify the install card appears.
+3. On Android/Chrome, use **Install App** and confirm DetourEats opens without the normal browser toolbar.
+4. On iPhone/Safari, open the install instructions and confirm they show Share → Add to Home Screen.
+5. Confirm the home-screen icon uses the new PNG artwork.
+6. Turn Wi-Fi/mobile data off and confirm the offline banner appears. The cached interface may reopen, but route preview should still explain that live data needs a connection.
+7. Turn connectivity back on and confirm the Back online message appears.
+8. Start a trip and confirm Drive Readiness updates for voice, alerts, live location, and screen-awake support.
+9. Confirm the warning says to keep DetourEats open and continue using Google Maps or Apple Maps for navigation.
+10. Rerun the v1.9.5 display checks and v1.9.4 skip/timing checks.

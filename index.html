@@ -4,16 +4,30 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#14532d">
+  <meta name="color-scheme" content="light">
   <meta name="description" content="DetourEats tells you when food is worth the stop on a road trip. No scrolling. No decision fatigue.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="DetourEats">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>DetourEats</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.9.5">
-  <link rel="icon" href="icons/icon-192.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=1.9.5">
+  <link rel="manifest" href="manifest.webmanifest?v=1.9.6">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css?v=1.9.6">
 </head>
 <body>
+  <div id="connectionBanner" class="connection-banner hidden" role="status" aria-live="polite">
+    <div>
+      <strong id="connectionBannerTitle">You’re offline</strong>
+      <span id="connectionBannerMessage">Route checks and new restaurant results need an internet connection.</span>
+    </div>
+    <button id="dismissConnectionBannerButton" type="button" aria-label="Dismiss connection message">×</button>
+  </div>
+
   <main class="app-shell">
     <section class="brand-bar">
-      <img class="brand-icon" src="icons/icon-192.svg" alt="" aria-hidden="true">
+      <img class="brand-icon" src="icons/icon-192.png" alt="" aria-hidden="true">
       <div>
         <h1>DetourEats</h1>
         <p>Know when the food is worth the detour.</p>
@@ -26,6 +40,19 @@
         <h2>Road-trip food decisions, handled.</h2>
         <p class="hero-copy">Choose any starting point and destination. DetourEats checks the route and recommends the stop that is actually worth it.</p>
       </div>
+
+      <section id="installAppCard" class="install-app-card hidden" aria-live="polite">
+        <img src="icons/icon-192.png" alt="" aria-hidden="true">
+        <div class="install-app-copy">
+          <span>Use it like an app</span>
+          <strong id="installAppTitle">Install DetourEats</strong>
+          <small id="installAppMessage">Add DetourEats to your home screen for faster launching and a full-screen experience.</small>
+        </div>
+        <div class="install-app-actions">
+          <button id="installAppButton" class="primary compact-action" type="button">Install App</button>
+          <button id="dismissInstallButton" class="text-button" type="button">Not now</button>
+        </div>
+      </section>
 
       <div class="panel setup-panel">
 
@@ -214,16 +241,40 @@
           <button id="previewRouteButton" class="secondary" type="button">Preview Route</button>
           <button id="startTripButton" class="primary" type="button">Trust Us</button>
         </div>
-        <section class="trip-alert-setup" aria-label="Trip alerts">
-          <div>
-            <span>Hands-free assistance</span>
-            <strong>Voice and approach alerts</strong>
-            <small>Alerts currently work while DetourEats remains active. Native background operation comes in the app conversion.</small>
+        <section class="trip-alert-setup drive-readiness-card" aria-label="Drive readiness">
+          <div class="drive-readiness-heading">
+            <div>
+              <span>Drive readiness</span>
+              <strong>Set up hands-free assistance</strong>
+              <small>DetourEats can speak and alert you while it remains open. The screen will be kept awake when your browser supports it.</small>
+            </div>
+            <span id="readinessSummaryBadge" class="readiness-summary-badge">Optional setup</span>
           </div>
+
+          <div class="readiness-list">
+            <div>
+              <span class="readiness-dot" id="locationReadinessDot" aria-hidden="true"></span>
+              <p><strong>Live location</strong><small id="locationReadinessStatus">Use My Location for progress updates during the drive.</small></p>
+            </div>
+            <div>
+              <span class="readiness-dot" id="voiceReadinessDot" aria-hidden="true"></span>
+              <p><strong>Spoken guidance</strong><small id="voiceReadinessStatus">Voice is off.</small></p>
+            </div>
+            <div>
+              <span class="readiness-dot" id="notificationReadinessDot" aria-hidden="true"></span>
+              <p><strong>Approach alerts</strong><small id="notificationReadinessStatus">Browser alerts are off.</small></p>
+            </div>
+            <div>
+              <span class="readiness-dot" id="screenReadinessDot" aria-hidden="true"></span>
+              <p><strong>During the drive</strong><small id="screenReadinessStatus">Keep DetourEats open. Background and locked-screen tracking are not available in this web beta.</small></p>
+            </div>
+          </div>
+
           <div class="trip-alert-buttons">
             <button id="voiceToggleButton" class="secondary compact-action" type="button">Turn Voice On</button>
             <button id="enableNotificationsButton" class="secondary compact-action" type="button">Enable Alerts</button>
           </div>
+          <p class="background-limit-note"><strong>Important:</strong> Do not rely on this beta as your navigation app. Keep Google Maps or Apple Maps running for directions, and keep DetourEats open for food recommendations.</p>
         </section>
 
         <p class="trust-note">Typed starting points and current location both use live beta routing. No fixed Amsterdam-to-Myrtle Beach route is required.</p>
@@ -507,17 +558,31 @@
     </section>
   </div>
 
-  <div class="build-version" aria-label="Application version">
-    DetourEats v1.9.5
+  <div id="installHelpModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="installHelpTitle">
+    <section class="install-help-card">
+      <div class="install-help-heading">
+        <div>
+          <span>Install DetourEats</span>
+          <strong id="installHelpTitle">Add it to your home screen</strong>
+        </div>
+        <button id="closeInstallHelpButton" class="skip-close" type="button" aria-label="Close install instructions">×</button>
+      </div>
+      <div id="installHelpSteps" class="install-help-steps"></div>
+      <button id="finishInstallHelpButton" class="primary" type="button">Got It</button>
+    </section>
   </div>
 
-  <script src="data.js?v=1.9.5"></script>
-  <script src="engine.js?v=1.9.5"></script>
-  <script src="review-evidence.js?v=1.9.5"></script>
-  <script src="place-status.js?v=1.9.5"></script>
-  <script src="live-route.js?v=1.9.5"></script>
-  <script src="address-search.js?v=1.9.5"></script>
-  <script src="restaurant-intelligence.js?v=1.9.5"></script>
-  <script src="app.js?v=1.9.5"></script>
+  <div class="build-version" aria-label="Application version">
+    DetourEats v1.9.6
+  </div>
+
+  <script src="data.js?v=1.9.6"></script>
+  <script src="engine.js?v=1.9.6"></script>
+  <script src="review-evidence.js?v=1.9.6"></script>
+  <script src="place-status.js?v=1.9.6"></script>
+  <script src="live-route.js?v=1.9.6"></script>
+  <script src="address-search.js?v=1.9.6"></script>
+  <script src="restaurant-intelligence.js?v=1.9.6"></script>
+  <script src="app.js?v=1.9.6"></script>
 </body>
 </html>

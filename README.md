@@ -1,18 +1,33 @@
-# DetourEats App v1.9.5 Location and Food Focus
+# DetourEats App v1.9.6 Installable Mobile Beta
 
-This release makes each recommendation easier to understand at a glance: where the restaurant is, what kind of food it serves or does well, and what the added-time number actually means.
+This release turns the existing mobile website into a more complete Progressive Web App. It can be installed from a supported phone or desktop browser and opened in a standalone, app-like window.
 
-## v1.9.5 highlights
+## v1.9.6 highlights
 
-- The town or city now appears directly beneath the restaurant name.
-- A prominent **Known for** or **Food type** line uses review themes, cuisine, provider categories, or curated specialties.
-- Road Ahead cards now include both location and food focus before the driver selects one.
-- The main review card shows the Google rating once instead of repeating it in a second source chip.
-- Provider source links remain available in the detailed evidence panel.
-- **Live route impact** is renamed **Added driving time** and explicitly excludes food, parking, and wait time.
-- Missing city and food-category fields can be enriched from matched Google Places or Yelp evidence.
+- Visible **Install DetourEats** prompt when installation is supported.
+- iPhone and iPad instructions for Safari’s **Add to Home Screen** flow.
+- Android and desktop installation guidance when the browser does not show an automatic prompt.
+- Proper PNG, Apple touch, and maskable app icons.
+- Improved standalone display around phone notches and bottom home indicators.
+- Drive Readiness status for live location, voice guidance, approach alerts, and screen-awake support.
+- Screen Wake Lock during an active trip on supported browsers.
+- Service-worker notifications when available, plus notification click-to-focus behavior.
+- Offline and connection-restored banners.
+- Cached application shell so the interface can reopen without a connection, while clearly explaining that new routes and restaurant checks still require internet access.
 
-This is the cleaned-up public prototype for DetourEats.com.
+## Installation
+
+### Android / Chrome
+
+Open the live DetourEats site in Chrome and use the on-screen **Install App** button. If Chrome does not offer it automatically, open the three-dot menu and choose **Install app** or **Add to Home screen**.
+
+### iPhone / Safari
+
+Open the live DetourEats site in Safari, tap **Share**, choose **Add to Home Screen**, and tap **Add**. Apple does not allow a website to trigger this install screen automatically.
+
+## Mobile-beta limitation
+
+DetourEats must remain open and visible for dependable route progress, voice, and approach alerts. Background GPS and locked-screen monitoring require the later native-app conversion. Continue using Google Maps or Apple Maps for turn-by-turn navigation.
 
 ## What changed from v0.1
 

@@ -1,9 +1,23 @@
 # DetourEats Changelog
 
+## v1.9.6 Installable Mobile Beta
+
+- Added a visible install experience for supported browsers, including the native Android/desktop install prompt and manual iPhone Add to Home Screen instructions.
+- Added production PNG icons, a 180 px Apple touch icon, and maskable Android icons.
+- Expanded the web-app manifest with app identity, scope, portrait orientation, categories, and a trip-planning shortcut.
+- Added iPhone standalone metadata and safer notch/home-indicator spacing.
+- Added a Drive Readiness panel for live location, spoken guidance, browser alerts, and screen-awake status.
+- Uses the Screen Wake Lock API during an active trip when supported.
+- Routes browser notifications through the service worker when possible for better mobile compatibility.
+- Added offline and restored-connection banners with cached app-shell fallback.
+- Added a clear warning that the web beta must remain open and is not a replacement for the user’s navigation app.
+- Added service-worker update detection and tap-to-focus behavior for notifications.
+- Reset browser and service-worker asset versions to v1.9.6.
+
 ## v1.9.5 Location and Food Focus
 
 - Shows the restaurant's town or city directly beneath its name on the main recommendation card.
-- Uses the connected review themes first to display a clear **Known for** line, such as burgers and homemade food.
+- Uses connected review themes first to display a clear **Known for** line, such as burgers and homemade food.
 - Falls back to cuisine, provider category, curated specialty, or a concise restaurant type when review themes are unavailable.
 - Adds the same location and food-focus context to every selectable Road Ahead option.
 - Removes the duplicate Google rating chip from the main recommendation card while retaining source links in the detailed evidence panel.

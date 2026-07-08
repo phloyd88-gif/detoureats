@@ -1,6 +1,6 @@
 # DetourEats Review Evidence Setup
 
-DetourEats v1.9.5 includes a Vercel Function at:
+DetourEats v1.9.6 includes a Vercel Function at:
 
 `/api/restaurant-evidence`
 
