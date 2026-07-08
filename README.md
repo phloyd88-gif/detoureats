@@ -1,4 +1,4 @@
-# DetourEats App v1.8.7 Full Repository Sync
+# DetourEats App v1.8.8 Unified Closure Validation
 
 This is the cleaned-up public prototype for DetourEats.com.
 
@@ -805,4 +805,20 @@ This package consolidates all current features and fixes into one complete
 repository upload. Cache-busted asset references and an updated service worker
 prevent older partially uploaded builds from continuing to run.
 
-The deployed page shows `DetourEats v1.8.7` at the bottom for verification.
+The deployed page shows `DetourEats v1.8.8` at the bottom for verification.
+
+
+## v1.8.8: Unified Closure Validation
+
+The short-route Nominatim fallback previously created restaurant candidates
+without passing them through the same known-closure and local-suppression layer
+used by the main OpenStreetMap discovery path.
+
+This release:
+
+- blocks G's Famous Lemon Cookies at 44 Main Street in Amsterdam
+- applies confirmed closure overrides to both main and fallback providers
+- applies locally reported closed, duplicate, and wrong-location suppressions
+  to fallback candidates
+- preserves conservative operational-confidence fields after validation
+- cache-busts every deployed application asset to v1.8.8

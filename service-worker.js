@@ -1,17 +1,17 @@
-const CACHE_NAME = "detoureats-v1-8-7-full-sync";
+const CACHE_NAME = "detoureats-v1-8-8-closure-validation";
 
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=1.8.7",
-  "./data.js?v=1.8.7",
-  "./engine.js?v=1.8.7",
-  "./place-status.js?v=1.8.7",
-  "./live-route.js?v=1.8.7",
-  "./address-search.js?v=1.8.7",
-  "./restaurant-intelligence.js?v=1.8.7",
-  "./app.js?v=1.8.7",
-  "./manifest.webmanifest?v=1.8.7",
+  "./styles.css?v=1.8.8",
+  "./data.js?v=1.8.8",
+  "./engine.js?v=1.8.8",
+  "./place-status.js?v=1.8.8",
+  "./live-route.js?v=1.8.8",
+  "./address-search.js?v=1.8.8",
+  "./restaurant-intelligence.js?v=1.8.8",
+  "./app.js?v=1.8.8",
+  "./manifest.webmanifest?v=1.8.8",
   "./icons/icon-192.svg",
   "./icons/icon-512.svg"
 ];

@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.8.8 Unified Closure Validation
+- Blocked G's Famous Lemon Cookies at 44 Main Street in Amsterdam as permanently closed.
+- Fixed the short-route Nominatim fallback bypassing known business-status overrides.
+- Added a provider-neutral candidate status assessor.
+- Applies local tester suppressions to both OpenStreetMap and fallback candidates.
+- Preserves operational confidence after fallback status validation.
+- Updated all cache-busted assets and the service-worker cache to v1.8.8.
+
+
 ## v1.8.7 Full Repository Sync
 - Consolidated all current files into one complete repository replacement.
 - Added cache-busted references for every JavaScript, CSS, and manifest asset.

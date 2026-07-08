@@ -1,4 +1,4 @@
-/* DetourEats v1.8.6 Route Verification Fix
+/* DetourEats v1.8.8 Unified Closure Validation
    No account or API token is required.
 
    Prototype services:
@@ -2571,7 +2571,7 @@
       openingHours
     ].filter(Boolean).length;
 
-    return {
+    const candidate = {
       id:
         `nominatim-${
           item?.osm_type || "place"
@@ -2688,6 +2688,43 @@
         metersToMiles(
           projection.distanceMeters
         ) * 1.5
+    };
+
+    const statusAssessment =
+      window.DetourEatsPlaceStatus
+        ?.assessCandidate?.(candidate) ||
+      {
+        blocked: false,
+        status:
+          candidate.operationalStatus,
+        confidence:
+          candidate.operationalConfidence,
+        reason:
+          candidate.operationalReason,
+        lastCheckedAt: "",
+        ageDays: 99999,
+        signalCount
+      };
+
+    if (statusAssessment.blocked) {
+      return null;
+    }
+
+    return {
+      ...candidate,
+      operationalStatus:
+        statusAssessment.status,
+      operationalConfidence:
+        statusAssessment.confidence,
+      operationalReason:
+        statusAssessment.reason,
+      operationalLastChecked:
+        statusAssessment.lastCheckedAt ||
+        candidate.operationalLastChecked,
+      operationalAgeDays:
+        statusAssessment.ageDays,
+      operationalSignals:
+        statusAssessment.signalCount
     };
   }
 

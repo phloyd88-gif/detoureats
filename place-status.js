@@ -1,4 +1,4 @@
-/* DetourEats v1.8.3 business status validation */
+/* DetourEats v1.8.8 unified business status validation */
 (function () {
   "use strict";
 
@@ -16,8 +16,117 @@
       verifiedAt: "2026-07-07",
       reason:
         "Confirmed former tavern listing. Shaker Mill Inn is a separate lodging business nearby, not this restaurant."
+    },
+    {
+      name: "g s famous lemon cookies",
+      city: "amsterdam",
+      addressContains: "44 main",
+      status: "closed",
+      verifiedAt: "2026-07-08",
+      reason:
+        "Confirmed permanently closed bakery listing at 44 Main Street in Amsterdam, New York."
     }
   ];
+
+  function assessCandidate(candidate) {
+    const normalized = {
+      id:
+        String(candidate?.id || ""),
+      name:
+        String(candidate?.name || "").trim(),
+      city:
+        String(candidate?.city || "").trim(),
+      address:
+        String(candidate?.address || "").trim(),
+      coordinates:
+        Array.isArray(candidate?.coordinates)
+          ? candidate.coordinates.map(Number)
+          : null
+    };
+
+    const localSuppression =
+      getSuppressionForCandidate(normalized);
+
+    if (localSuppression) {
+      return {
+        blocked: true,
+        status: "locally-suppressed",
+        confidence: "confirmed",
+        reasonCode: "local-report",
+        reason:
+          `Hidden after a local ${localSuppression.issueType} report.`,
+        lastCheckedAt:
+          localSuppression.createdAt,
+        ageDays: 0,
+        signalCount: 0
+      };
+    }
+
+    const override =
+      matchKnownStatusOverride(normalized);
+
+    if (override?.status === "closed") {
+      return {
+        blocked: true,
+        status: "closed",
+        confidence: "confirmed",
+        reasonCode: "known-closed",
+        reason: override.reason,
+        lastCheckedAt:
+          override.verifiedAt,
+        ageDays: 0,
+        signalCount: 0
+      };
+    }
+
+    const signalCount = [
+      candidate?.website,
+      candidate?.phone,
+      candidate?.publishedHours &&
+      candidate.publishedHours !== "Not listed"
+        ? candidate.publishedHours
+        : "",
+      candidate?.socialUrl
+    ].filter(value =>
+      String(value || "").trim()
+    ).length;
+
+    return {
+      blocked: false,
+      status:
+        candidate?.operationalStatus ||
+        (
+          signalCount >= 2
+            ? "operational-signals-present"
+            : "unverified"
+        ),
+      confidence:
+        candidate?.operationalConfidence ||
+        (
+          signalCount >= 2
+            ? "medium"
+            : "low"
+        ),
+      reasonCode: "allowed",
+      reason:
+        candidate?.operationalReason ||
+        (
+          signalCount >= 2
+            ? "Multiple operating signals are present, but current operation has not been independently confirmed."
+            : "Current operation has not been independently confirmed."
+        ),
+      lastCheckedAt:
+        candidate?.operationalLastChecked ||
+        "",
+      ageDays:
+        Number.isFinite(
+          Number(candidate?.operationalAgeDays)
+        )
+          ? Number(candidate.operationalAgeDays)
+          : 99999,
+      signalCount
+    };
+  }
 
   function assessOsmElement(element) {
     const tags = element?.tags || {};
@@ -526,6 +635,7 @@
   }
 
   window.DetourEatsPlaceStatus = {
+    assessCandidate,
     assessOsmElement,
     matchKnownStatusOverride,
     suppressCandidate,

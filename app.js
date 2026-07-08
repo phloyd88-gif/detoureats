@@ -1,4 +1,4 @@
-/* DetourEats v1.8.7 Full Repository Sync
+/* DetourEats v1.8.8 Unified Closure Validation
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -3611,7 +3611,7 @@ function escapeHtml(value) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.8.7", {
+      .register("service-worker.js?v=1.8.8", {
         updateViaCache: "none"
       })
       .then(registration => {
