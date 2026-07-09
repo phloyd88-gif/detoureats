@@ -1,4 +1,4 @@
-/* DetourEats v2.0.4 Restaurant Identity and Food Focus
+/* DetourEats v2.0.6 Restaurant Identity and Food Focus
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -97,7 +97,13 @@ const els = {
   fasterButton: document.getElementById("fasterButton"),
   recheckRouteButton: document.getElementById("recheckRouteButton"),
   rateLastStopButton: document.getElementById("rateLastStopButton"),
+  rateSuggestionButton: document.getElementById("rateSuggestionButton"),
+  suggestionFeedbackPanel: document.getElementById("suggestionFeedbackPanel"),
+  closeSuggestionFeedbackButton: document.getElementById("closeSuggestionFeedbackButton"),
+  suggestionFeedbackButtons: Array.from(document.querySelectorAll("[data-suggestion-feedback]")),
   reportPlaceButton: document.getElementById("reportPlaceButton"),
+  downloadDiagnosticsButton: document.getElementById("downloadDiagnosticsButton"),
+  resetLearningButton: document.getElementById("resetLearningButton"),
   fieldTestPanel: document.getElementById("fieldTestPanel"),
   fieldTestSnapshotCount: document.getElementById("fieldTestSnapshotCount"),
   fieldTestIssueCount: document.getElementById("fieldTestIssueCount"),
@@ -1008,6 +1014,7 @@ function toggleWhyDetails() {
   state.detailsOpen = willOpen;
   els.detailsPanel.classList.toggle("hidden", !state.detailsOpen);
   els.tripToolsPanel?.classList.add("hidden");
+  els.suggestionFeedbackPanel?.classList.add("hidden");
   els.whyButton.textContent = state.detailsOpen ? "Close" : "Why";
   els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
   els.moreActionsButton?.setAttribute("aria-expanded", "false");
@@ -1031,6 +1038,7 @@ function closeDriveSheets() {
   state.tripToolsOpen = false;
   els.detailsPanel?.classList.add("hidden");
   els.tripToolsPanel?.classList.add("hidden");
+  els.suggestionFeedbackPanel?.classList.add("hidden");
   els.whyButton.textContent = "Why";
   els.whyButton.setAttribute("aria-expanded", "false");
   els.moreActionsButton?.setAttribute("aria-expanded", "false");
@@ -3998,6 +4006,113 @@ function createEmptyPreferenceProfile() {
   };
 }
 
+const RECOMMENDATION_FEEDBACK_KEY = "detoureats_recommendation_feedback_v1";
+const APP_DIAGNOSTICS_KEY = "detoureats_app_diagnostics_v1";
+
+function recordAppDiagnostic(type, detail = {}) {
+  try {
+    const entries = JSON.parse(localStorage.getItem(APP_DIAGNOSTICS_KEY) || "[]");
+    entries.push({ timestamp: Date.now(), type, detail });
+    localStorage.setItem(APP_DIAGNOSTICS_KEY, JSON.stringify(entries.slice(-100)));
+  } catch {}
+}
+
+function downloadProblemDiagnostics() {
+  const pick = state.currentPick;
+  const result = state.currentResult;
+  const payload = {
+    appVersion: "2.0.6",
+    generatedAt: new Date().toISOString(),
+    online: navigator.onLine,
+    userAgent: navigator.userAgent,
+    route: { origin: state.origin, destination: state.destination, routingMode: state.routingMode },
+    settings: getFieldTestSettings(),
+    recommendation: pick ? {
+      id: pick.id, name: pick.name, city: pick.city || "", score: pick.score,
+      addedMinutes: pick.added ?? pick.estimatedAddedMinutes ?? null,
+      chain: Boolean(pick.chain), category: pick.category || pick.cuisine || ""
+    } : null,
+    resultSummary: result ? {
+      evaluatedCount: result.evaluated?.length || 0,
+      roadAheadCount: result.roadAhead?.length || 0,
+      hasPick: Boolean(result.pick || pick),
+      reason: result.reason || result.status || ""
+    } : null,
+    recentDiagnostics: (() => { try { return JSON.parse(localStorage.getItem(APP_DIAGNOSTICS_KEY) || "[]"); } catch { return []; } })(),
+    recentSuggestionFeedback: (() => { try { return JSON.parse(localStorage.getItem(RECOMMENDATION_FEEDBACK_KEY) || "[]").slice(-25); } catch { return []; } })()
+  };
+  downloadFieldTestFile(`detoureats-problem-${Date.now()}.json`, JSON.stringify(payload, null, 2), "application/json");
+  showToast("Diagnostic file created", "Keep this file to share when reporting a problem.");
+  closeDriveSheets();
+}
+
+function resetLearnedPreferences() {
+  const confirmed = window.confirm("Clear learned preferences and testing feedback on this device?");
+  if (!confirmed) return;
+  [LEARNED_PREFERENCES_KEY, RECOMMENDATION_FEEDBACK_KEY, APP_DIAGNOSTICS_KEY, PENDING_VISIT_KEY].forEach(key => localStorage.removeItem(key));
+  state.skippedIds = new Set();
+  state.minimumScore = 0;
+  showToast("Learning reset", "DetourEats is back to neutral recommendation preferences.");
+  closeDriveSheets();
+  render();
+}
+
+window.addEventListener("error", event => recordAppDiagnostic("window-error", { message: event.message, source: event.filename, line: event.lineno, column: event.colno }));
+window.addEventListener("unhandledrejection", event => recordAppDiagnostic("unhandled-rejection", { message: String(event.reason?.message || event.reason || "Unknown rejection") }));
+
+function openSuggestionFeedback() {
+  const pick = state.currentPick;
+  if (!pick) {
+    showToast("No suggestion to rate", "Wait for DetourEats to surface a stop first.");
+    return;
+  }
+  closeDriveSheets();
+  const title = document.getElementById("suggestionFeedbackTitle");
+  if (title) title.textContent = `How is ${pick.name}?`;
+  els.suggestionFeedbackPanel?.classList.remove("hidden");
+  els.driveSheetBackdrop?.classList.remove("hidden");
+}
+
+function saveSuggestionFeedback(reason) {
+  const pick = state.currentPick;
+  if (!pick) return;
+  let entries = [];
+  try { entries = JSON.parse(localStorage.getItem(RECOMMENDATION_FEEDBACK_KEY) || "[]"); } catch {}
+  entries.push({
+    timestamp: Date.now(),
+    restaurantId: pick.id,
+    restaurantName: pick.name,
+    category: pick.category || pick.cuisine || "",
+    chain: Boolean(pick.chain),
+    score: pick.score,
+    addedMinutes: pick.added ?? pick.estimatedAddedMinutes,
+    reason
+  });
+  localStorage.setItem(RECOMMENDATION_FEEDBACK_KEY, JSON.stringify(entries.slice(-250)));
+
+  const positive = reason === "good";
+  updatePreferenceProfile({
+    ...pick,
+    category: pick.category || pick.cuisine || "",
+    quickStop: pick.quickStop,
+    sitDown: pick.sitDown,
+    localFavorite: pick.localFavorite,
+    regionalSpecialty: pick.regionalSpecialty
+  }, positive ? "positive" : "negative", reason);
+
+  if (reason === "chain") {
+    state.chainPolicy = "never";
+    if (els.chainPolicyInput) els.chainPolicyInput.value = "never";
+  }
+  if (reason === "too-far") state.maxAdded = Math.max(3, Number(state.maxAdded || 10) - 2);
+  if (["wrong-type", "not-appealing"].includes(reason)) state.skippedIds.add(String(pick.id));
+
+  els.suggestionFeedbackPanel?.classList.add("hidden");
+  els.driveSheetBackdrop?.classList.add("hidden");
+  showToast("Feedback saved", positive ? "DetourEats will favor similar suggestions." : "DetourEats will adjust future suggestions.");
+  render();
+}
+
 function openStopFeedback() {
   const pending = state.pendingVisit || loadPendingVisit();
   if (!pending) {
@@ -4528,7 +4643,7 @@ async function showSystemNotification(title, options = {}) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=2.0.4", {
+      .register("service-worker.js?v=2.0.6", {
         updateViaCache: "none"
       })
       .then(registration => {
@@ -4696,7 +4811,14 @@ els.exceptionalDismissButton.addEventListener(
   dismissExceptionalOpportunity
 );
 els.rateLastStopButton.addEventListener("click", openStopFeedback);
+els.rateSuggestionButton?.addEventListener("click", openSuggestionFeedback);
+els.closeSuggestionFeedbackButton?.addEventListener("click", closeDriveSheets);
+(els.suggestionFeedbackButtons || []).forEach(button => {
+  button.addEventListener("click", () => saveSuggestionFeedback(button.dataset.suggestionFeedback));
+});
 els.reportPlaceButton.addEventListener("click", openPlaceIssueReport);
+els.downloadDiagnosticsButton?.addEventListener("click", downloadProblemDiagnostics);
+els.resetLearningButton?.addEventListener("click", resetLearnedPreferences);
 els.placeIssueButtons.forEach(button => {
   button.addEventListener("click", () =>
     selectPlaceIssue(button.dataset.placeIssue)

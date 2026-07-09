@@ -4415,7 +4415,7 @@ body.drive-sheet-open {
 
 
 /* =========================================================
-   DetourEats v2.0.4 — chain integrity and mobile containment
+   DetourEats v2.0.6 — chain integrity and mobile containment
    ========================================================= */
 html,
 body {
@@ -4595,7 +4595,7 @@ textarea {
 }
 
 /* =========================================================
-   DetourEats v2.0.4 — compact Road Ahead rows
+   DetourEats v2.0.6 — compact Road Ahead rows
    ========================================================= */
 .trip-timeline {
   display: flex;
@@ -4721,3 +4721,31 @@ textarea {
     padding: 8px 6px;
   }
 }
+
+
+/* v2.0.6 recommendation feedback */
+.suggestion-feedback-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.suggestion-feedback-grid button {
+  min-width: 0;
+  min-height: 54px;
+  padding: 12px 14px;
+  border: 1px solid rgba(31, 120, 74, .22);
+  border-radius: 16px;
+  background: #f4fff7;
+  color: #073d25;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+}
+@media (max-width: 430px) {
+  .suggestion-feedback-grid { grid-template-columns: 1fr; }
+}
+
+/* v2.0.6 beta hardening */
+.trip-tools-privacy-note { margin: 12px 4px 0; font-size: .78rem; line-height: 1.4; color: var(--muted, #687078); }
+@media (max-width: 520px) { .trip-tools-grid { grid-template-columns: 1fr; } }

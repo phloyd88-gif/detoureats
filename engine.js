@@ -1,4 +1,4 @@
-/* DetourEats v2.0.4 Review-Backed Scoring Engine
+/* DetourEats v2.0.6 Review-Backed Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -771,13 +771,18 @@ It is restaurant quality filtered through trip fit.
       c.reviewConfidence * 0.08
     );
 
-    const restaurantQuality =
+    const baseRestaurantQuality =
       reviewBacked
         ? clamp(
             c.reviewEvidence
               .foodScore
           )
         : provisionalQuality;
+
+    const qualityAdjustment = scoreRestaurantQualitySignals(c, reviewBacked);
+    const restaurantQuality = clamp(
+      baseRestaurantQuality + qualityAdjustment.adjustment
+    );
 
     const timeFit = scoreAddedTime(c.estimatedAddedMinutes, maxAdded);
     const openFit =
@@ -985,7 +990,8 @@ It is restaurant quality filtered through trip fit.
       tier,
       maxAdded,
       detourGate,
-      reviewBacked
+      reviewBacked,
+      qualitySignalReasons: qualityAdjustment.reasons
     });
 
     return {
@@ -1032,6 +1038,51 @@ It is restaurant quality filtered through trip fit.
 
     const independent = scored.filter(candidate => !candidate.chain);
     return independent.length ? independent : scored;
+  }
+
+  function scoreRestaurantQualitySignals(candidate, reviewBacked) {
+    const categoryText = String([
+      candidate.category,
+      candidate.cuisine,
+      candidate.googlePrimaryType,
+      ...(candidate.googleTypes || [])
+    ].filter(Boolean).join(" ")).toLowerCase();
+    const nameText = String(candidate.name || "").toLowerCase();
+    const evidence = candidate.reviewEvidence || {};
+    const reviewCount = number(evidence.reviewCount ?? candidate.googleDiscoveryReviewCount, 0);
+    const themes = Array.isArray(evidence.themes) ? evidence.themes : (Array.isArray(evidence.foodThemes) ? evidence.foodThemes : []);
+    const concerns = Array.isArray(evidence.concerns) ? evidence.concerns : [];
+    let adjustment = 0;
+    const reasons = [];
+
+    const nonRestaurantSignals = [
+      [/(cater|catering|event service)/, -12, "Primarily appears to be a catering or event business."],
+      [/(convenience|gas station|truck stop|grocery|supermarket)/, -14, "Food listing appears secondary to a non-restaurant business."],
+      [/(coffee|cafe|café)/, -5, "Coffee-focused listing has limited meal evidence."],
+      [/(bakery|bakeshop)/, -3, "Bakery evidence is treated more conservatively as a full meal stop."],
+      [/(bar|pub|tavern)/, -2, "Food evidence is separated from bar-focused popularity."]
+    ];
+    for (const [pattern, penalty, reason] of nonRestaurantSignals) {
+      if (pattern.test(categoryText) || pattern.test(nameText)) {
+        adjustment += penalty;
+        reasons.push(reason);
+        break;
+      }
+    }
+
+    if (reviewBacked) {
+      if (reviewCount < 25) { adjustment -= 7; reasons.push("Very limited review volume lowers confidence."); }
+      else if (reviewCount < 75) { adjustment -= 4; reasons.push("Limited review volume lowers confidence."); }
+      else if (reviewCount >= 500) adjustment += 2;
+      if (themes.length >= 2) { adjustment += 3; reasons.push("Multiple repeated food strengths support the score."); }
+      else if (themes.length === 0) { adjustment -= 3; reasons.push("Reviews provide little dish-specific food evidence."); }
+      if (concerns.length >= 2) { adjustment -= 4; reasons.push("Multiple recurring concerns reduce consistency."); }
+    } else {
+      adjustment -= 3;
+      reasons.push("Food score remains provisional without connected review evidence.");
+    }
+
+    return { adjustment, reasons };
   }
 
   function scorePreferences(candidate, settings) {
@@ -1680,6 +1731,9 @@ It is restaurant quality filtered through trip fit.
 
   function explainScore(c, s) {
     const bullets = [];
+    if (Array.isArray(s.qualitySignalReasons)) {
+      bullets.push(...s.qualitySignalReasons);
+    }
 
     if (
       c.provenance === "route-discovered" ||

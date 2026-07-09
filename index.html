@@ -11,10 +11,10 @@
   <meta name="apple-mobile-web-app-title" content="DetourEats">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>DetourEats</title>
-  <link rel="manifest" href="manifest.webmanifest?v=2.0.4">
+  <link rel="manifest" href="manifest.webmanifest?v=2.0.6">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=2.0.4">
+  <link rel="stylesheet" href="styles.css?v=2.0.6">
 </head>
 <body>
   <div id="connectionBanner" class="connection-banner hidden" role="status" aria-live="polite">
@@ -449,7 +449,28 @@
           <button id="fasterButton" class="trip-tool-button" type="button"><strong>Eat sooner</strong><span>Favor the earliest reasonable stop</span></button>
           <button id="recheckRouteButton" class="trip-tool-button hidden" type="button"><strong>Recheck route</strong><span>Refresh route and restaurant timing</span></button>
           <button id="rateLastStopButton" class="trip-tool-button hidden" type="button"><strong>Rate last stop</strong><span>Help future recommendations</span></button>
+          <button id="rateSuggestionButton" class="trip-tool-button" type="button"><strong>Rate this suggestion</strong><span>Tell DetourEats what missed or worked</span></button>
           <button id="reportPlaceButton" class="trip-tool-button" type="button"><strong>Report place</strong><span>Flag hours, closure, location, or quality</span></button>
+          <button id="downloadDiagnosticsButton" class="trip-tool-button" type="button"><strong>Report a problem</strong><span>Download a diagnostic file for troubleshooting</span></button>
+          <button id="resetLearningButton" class="trip-tool-button" type="button"><strong>Reset learned preferences</strong><span>Clear testing feedback and personalized adjustments</span></button>
+        </div>
+        <p class="trip-tools-privacy-note">DetourEats uses location only to calculate and monitor your route. Testing feedback stays on this device unless you export a diagnostic file.</p>
+      </section>
+
+
+      <section id="suggestionFeedbackPanel" class="drive-bottom-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="suggestionFeedbackTitle">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="drive-sheet-heading">
+          <div><span>Recommendation feedback</span><strong id="suggestionFeedbackTitle">How is this suggestion?</strong></div>
+          <button id="closeSuggestionFeedbackButton" class="skip-close" type="button" aria-label="Close feedback">×</button>
+        </div>
+        <div class="suggestion-feedback-grid">
+          <button type="button" data-suggestion-feedback="good">Good suggestion</button>
+          <button type="button" data-suggestion-feedback="not-appealing">Not appealing</button>
+          <button type="button" data-suggestion-feedback="wrong-type">Wrong type of place</button>
+          <button type="button" data-suggestion-feedback="too-far">Too far</button>
+          <button type="button" data-suggestion-feedback="chain">Chain slipped through</button>
+          <button type="button" data-suggestion-feedback="bad-data">Bad information</button>
         </div>
       </section>
 
@@ -591,16 +612,16 @@
   </div>
 
   <div class="build-version" aria-label="Application version">
-    DetourEats v2.0.4
+    DetourEats v2.0.6
   </div>
 
-  <script src="data.js?v=2.0.4"></script>
-  <script src="engine.js?v=2.0.4"></script>
-  <script src="review-evidence.js?v=2.0.4"></script>
-  <script src="place-status.js?v=2.0.4"></script>
-  <script src="live-route.js?v=2.0.4"></script>
-  <script src="address-search.js?v=2.0.4"></script>
-  <script src="restaurant-intelligence.js?v=2.0.4"></script>
-  <script src="app.js?v=2.0.4"></script>
+  <script src="data.js?v=2.0.6"></script>
+  <script src="engine.js?v=2.0.6"></script>
+  <script src="review-evidence.js?v=2.0.6"></script>
+  <script src="place-status.js?v=2.0.6"></script>
+  <script src="live-route.js?v=2.0.6"></script>
+  <script src="address-search.js?v=2.0.6"></script>
+  <script src="restaurant-intelligence.js?v=2.0.6"></script>
+  <script src="app.js?v=2.0.6"></script>
 </body>
 </html>

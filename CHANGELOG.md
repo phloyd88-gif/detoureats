@@ -1,6 +1,25 @@
+# DetourEats v2.0.6
+
+## Beta hardening
+
+- Added a one-tap diagnostic export containing route context, active settings, recommendation details, candidate counts, recent errors, and recent suggestion feedback.
+- Added a reset control for learned preferences and testing feedback.
+- Added browser-level capture for uncaught errors and rejected promises.
+- Added a concise location/privacy explanation in Trip Tools.
+- Kept diagnostic and feedback information local unless the tester explicitly exports it.
+
+# DetourEats v2.0.6
+
+- Tightens Food scores for caterers, convenience listings, coffee-first businesses, bakeries, and other weak meal matches.
+- Applies more conservative scoring when review volume is thin or dish-specific evidence is missing.
+- Rewards multiple repeated food strengths and penalizes multiple recurring concerns.
+- Adds an in-trip “Rate this suggestion” control with good suggestion, not appealing, wrong type, too far, chain slipped through, and bad information feedback.
+- Saves recommendation feedback locally and applies it to learned preferences during testing.
+- Automatically skips a rejected suggestion and can tighten chain or detour preferences based on explicit feedback.
+
 # Changelog
 
-## v2.0.4 — Mobile Road Ahead Redesign
+## v2.0.6 — Mobile Road Ahead Redesign
 
 - Replaced the narrow side-by-side Road Ahead cards with full-width compact rows.
 - Removed horizontal swiping from the Road Ahead section.
@@ -8,7 +27,7 @@
 - Kept each alternative directly selectable with a compact Choose stop button.
 - Reduced card height and spacing so several options remain visible without excessive scrolling.
 
-## v2.0.4 — Chain Exclusion and Mobile Width Fix
+## v2.0.6 — Chain Exclusion and Mobile Width Fix
 
 - Adds Dave’s Hot Chicken and additional national/regional brands to chain detection.
 - Normalizes apostrophes, punctuation, and spacing before chain matching, so branded Google Places results cannot bypass **Never show chains** because of name formatting.
@@ -17,7 +36,7 @@
 - Constrains sticky actions, bottom sheets, long addresses, metrics, and headers to the device viewport.
 
 
-## v2.0.4 — Eligibility Rescue and Denser Route Scan
+## v2.0.6 — Eligibility Rescue and Denser Route Scan
 
 - Adds a final hard-eligibility safety net so **Keep driving** cannot appear while a forward, non-backtracking, non-closed restaurant remains.
 - Moves quick-stop, sit-down, cuisine, price, and related preferences fully into ranking instead of hard filtering.

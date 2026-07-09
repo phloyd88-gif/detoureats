@@ -1,4 +1,4 @@
-# Deploy DetourEats v2.0.4
+# Deploy DetourEats v2.0.6
 
 This package is a complete replacement for the current DetourEats GitHub repository contents.
 
@@ -14,7 +14,7 @@ This package is a complete replacement for the current DetourEats GitHub reposit
 6. Commit the changes.
 7. Wait for the Vercel deployment to show **Ready**.
 8. Open DetourEats in a new private/incognito window.
-9. Confirm the footer reads `DetourEats v2.0.4`.
+9. Confirm the footer reads `DetourEats v2.0.6`.
 
 The existing `GOOGLE_PLACES_API_KEY` environment variable remains in Vercel. It does not need to be entered again.
 
@@ -53,7 +53,7 @@ styles.css
 
 ## Cache handling
 
-Version 2.0.4 uses new JavaScript/CSS query strings and a new service-worker cache. Road Ahead is now a non-scrolling full-width row list on phones. It also migrates the former hard chain default to independent-first fallback behavior. A private window is still recommended for the first test. If an installed home-screen app remains stale, remove it and install it again.
+Version 2.0.6 uses new JavaScript/CSS query strings and a new service-worker cache. Road Ahead is now a non-scrolling full-width row list on phones. It also migrates the former hard chain default to independent-first fallback behavior. A private window is still recommended for the first test. If an installed home-screen app remains stale, remove it and install it again.
 
 ## Google usage note
 
