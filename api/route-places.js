@@ -1,4 +1,4 @@
-/* DetourEats v2.0.2 Google Places route discovery API */
+/* DetourEats v2.0.3 Google Places route discovery API */
 const MAX_SAMPLE_POINTS = 7;
 const MAX_RESULTS_PER_POINT = 12;
 const TIMEOUT_MS = 7500;
@@ -13,7 +13,7 @@ module.exports = async function handler(req, res) {
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   if (!apiKey) {
     return end(res, 200, {
-      version: "2.0.2",
+      version: "2.0.3",
       status: "not_configured",
       places: []
     });
@@ -54,7 +54,7 @@ module.exports = async function handler(req, res) {
       .slice(0, 28);
 
     return end(res, 200, {
-      version: "2.0.2",
+      version: "2.0.3",
       status: successfulSearches ? "ok" : "unavailable",
       successfulSearches,
       attemptedSearches: samplePoints.length,

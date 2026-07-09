@@ -95,7 +95,10 @@
     "chick-fil-a", "popeyes", "arby", "sonic", "domino",
     "pizza hut", "little caesars", "five guys", "cracker barrel",
     "denny", "ihop", "applebee", "chili", "olive garden",
-    "outback", "longhorn", "texas roadhouse", "buffalo wild wings"
+    "outback", "longhorn", "texas roadhouse", "buffalo wild wings",
+    "dave's hot chicken", "daves hot chicken", "raising cane", "shake shack",
+    "jersey mike", "jimmy john", "firehouse subs", "wingstop", "culver",
+    "freddy's", "freddys", "zaxby", "bojangles", "whataburger", "in-n-out"
   ];
 
   function loadJsonStorage(key) {
@@ -5276,16 +5279,30 @@ out center tags meta;`;
     };
   }
 
-  function detectChain(name, tags) {
-    const haystack = [
+  function normalizeChainText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[’'`]/g, "")
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function detectChain(name, tags = {}) {
+    const haystack = normalizeChainText([
       name,
       tags.brand,
       tags.operator,
       tags["brand:wikidata"]
-    ].filter(Boolean).join(" ").toLowerCase();
+    ].filter(Boolean).join(" "));
 
     if (tags["brand:wikidata"]) return true;
-    return KNOWN_CHAINS.some(chain => haystack.includes(chain));
+    return KNOWN_CHAINS.some(chain => {
+      const normalizedChain = normalizeChainText(chain);
+      return normalizedChain && haystack.includes(normalizedChain);
+    });
   }
 
   function buildAddress(tags) {

@@ -1,12 +1,16 @@
-# DetourEats v2.0.2
+# DetourEats v2.0.3
 
-## v2.0.2 route-availability correction
+## Chain-filter and mobile-layout correction
 
-Version 2.0.2 fixes the false **Keep driving** condition at the eligibility layer. DetourEats now has a second, independent safety-net pass that keeps the strongest usable restaurant visible whenever any forward, non-backtracking, non-closed option exists. Quick versus sit-down, cuisine, price, and similar choices affect ranking rather than deleting the candidate pool.
+Version 2.0.3 fixes two production-blocking issues: recognized chains such as Dave’s Hot Chicken can no longer pass through **Never show chains**, and the driving interface is constrained to the phone viewport so the page itself does not scroll sideways. Road Ahead remains intentionally swipeable within its own carousel.
+
+## v2.0.3 route-availability correction
+
+Version 2.0.3 fixes the false **Keep driving** condition at the eligibility layer. DetourEats now has a second, independent safety-net pass that keeps the strongest usable restaurant visible whenever any forward, non-backtracking, non-closed option exists. Quick versus sit-down, cuisine, price, and similar choices affect ranking rather than deleting the candidate pool.
 
 The route discovery scan is also denser and more front-loaded. Long routes now check up to seven Google route points, including several near the beginning of the trip, so **Eat soon** is less likely to miss nearby independent restaurants.
 
-## What changed in v2.0.2
+## What changed in v2.0.3
 
 ### Availability and fallback integrity
 
@@ -49,7 +53,7 @@ The existing Vercel environment variable is still used:
 GOOGLE_PLACES_API_KEY
 ```
 
-The key must allow **Places API (New)**. No new variable is required for v2.0.2.
+The key must allow **Places API (New)**. No new variable is required for v2.0.3.
 
 Optional integrations remain supported:
 

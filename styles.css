@@ -4412,3 +4412,184 @@ body.drive-sheet-open {
   font-size: 11px;
   line-height: 1.35;
 }
+
+
+/* =========================================================
+   DetourEats v2.0.3 — chain integrity and mobile containment
+   ========================================================= */
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+body,
+.app-shell,
+.screen,
+.panel,
+.decision-card,
+.trip-timeline-panel,
+.driver-status-panel,
+.brand-bar,
+.drive-priority-panel {
+  min-width: 0;
+  max-width: 100%;
+}
+
+img,
+svg,
+canvas,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+button,
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.drive-top,
+.driver-status-top,
+.timeline-heading,
+.compact-decision-top,
+.road-card-top,
+.road-card-meta,
+.drive-sheet-heading {
+  min-width: 0;
+}
+
+.drive-top > *,
+.driver-status-top > *,
+.timeline-heading > *,
+.compact-decision-top > *,
+.road-card-top > *,
+.road-card-meta > *,
+.drive-sheet-heading > * {
+  min-width: 0;
+}
+
+.compact-place-copy h2,
+.compact-location,
+.compact-food-focus,
+.compact-rating-line,
+.compact-decision-reason,
+.compact-next-option p,
+.driver-status-grid strong,
+.routing-progress-message,
+.road-ahead-card h3,
+.road-card-location,
+.road-card-food,
+.brand-bar p {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 600px) {
+  body.drive-mode .app-shell,
+  .app-shell {
+    width: 100%;
+    max-width: 100vw;
+    padding-left: max(9px, env(safe-area-inset-left));
+    padding-right: max(9px, env(safe-area-inset-right));
+  }
+
+  body.drive-mode .brand-bar {
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  body.drive-mode .brand-logo {
+    width: min(158px, 48vw);
+    flex: 0 1 auto;
+  }
+
+  .drive-top {
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+  }
+
+  .priority-chip-row,
+  .compact-metrics,
+  .driver-status-grid {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .compact-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .compact-metrics span,
+  .compact-metrics strong {
+    white-space: normal;
+  }
+
+  .trip-timeline-panel {
+    overflow: hidden;
+  }
+
+  .trip-timeline {
+    width: 100%;
+    max-width: 100%;
+    grid-auto-columns: minmax(0, 86%);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .road-ahead-card {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .driver-sticky-actions,
+  .drive-bottom-sheet {
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100vw;
+    transform: none;
+  }
+
+  @keyframes sheetUp {
+    from { transform: translateY(24px); opacity: .65; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .driver-sticky-actions {
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, .8fr) minmax(0, .62fr) minmax(0, .62fr);
+  }
+
+  .driver-sticky-actions button {
+    min-width: 0;
+    padding-inline: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+@media (max-width: 390px) {
+  .compact-decision-main {
+    grid-template-columns: 68px minmax(0, 1fr);
+  }
+
+  .compact-score {
+    width: 68px;
+    height: 68px;
+    border-width: 6px;
+  }
+
+  .compact-place-copy h2 {
+    font-size: 22px;
+  }
+
+  .priority-chip {
+    font-size: 10px;
+    padding-inline: 4px;
+  }
+}
