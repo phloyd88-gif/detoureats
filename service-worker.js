@@ -1,25 +1,27 @@
-const CACHE_NAME = "detoureats-v1-9-6-mobile-ready";
+const CACHE_NAME = "detoureats-v2-0-0-clean-results";
 
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=1.9.6",
-  "./data.js?v=1.9.6",
-  "./engine.js?v=1.9.6",
-  "./review-evidence.js?v=1.9.6",
-  "./place-status.js?v=1.9.6",
-  "./live-route.js?v=1.9.6",
-  "./address-search.js?v=1.9.6",
-  "./restaurant-intelligence.js?v=1.9.6",
-  "./app.js?v=1.9.6",
-  "./manifest.webmanifest?v=1.9.6",
+  "./styles.css?v=2.0.0",
+  "./data.js?v=2.0.0",
+  "./engine.js?v=2.0.0",
+  "./review-evidence.js?v=2.0.0",
+  "./place-status.js?v=2.0.0",
+  "./live-route.js?v=2.0.0",
+  "./address-search.js?v=2.0.0",
+  "./restaurant-intelligence.js?v=2.0.0",
+  "./app.js?v=2.0.0",
+  "./manifest.webmanifest?v=2.0.0",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/icon-maskable-192.png",
   "./icons/icon-maskable-512.png",
   "./icons/apple-touch-icon.png",
-  "./icons/icon-192.svg",
-  "./icons/icon-512.svg"
+  "./assets/detoureats-mark.png",
+  "./assets/detoureats-wordmark.png",
+  "./assets/detoureats-logo-horizontal.png",
+  "./assets/detoureats-logo-stacked.png"
 ];
 
 self.addEventListener("install", event => {

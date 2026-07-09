@@ -1,5 +1,5 @@
-/* DetourEats v1.9.6 review-backed evidence API */
-const MAX_CANDIDATES = 5;
+/* DetourEats v2.0.0 review-backed evidence API */
+const MAX_CANDIDATES = 8;
 const TIMEOUT_MS = 7500;
 let redditToken = { value: "", expiresAt: 0 };
 
@@ -20,16 +20,17 @@ module.exports = async function handler(req, res) {
     const configured = configuredProviders();
     if (!configured.length) {
       return end(res, 200, {
-        version: "1.9.6",
+        version: "2.0.0",
         status: "not_configured",
         configuredProviders: [],
         results: candidates.map(c => ({ key: c.key, status: "not_configured" }))
       });
     }
 
-    const results = [];
-    for (const candidate of candidates) results.push(await evidenceFor(candidate, configured));
-    return end(res, 200, { version: "1.9.6", status: "ok", configuredProviders: configured, results });
+    const results = await Promise.all(
+      candidates.map(candidate => evidenceFor(candidate, configured))
+    );
+    return end(res, 200, { version: "2.0.0", status: "ok", configuredProviders: configured, results });
   } catch (error) {
     console.error("restaurant-evidence", error);
     return end(res, 500, { error: "evidence_failed", message: "Live restaurant evidence could not be loaded." });
@@ -74,34 +75,51 @@ async function safe(provider, fn) {
 async function googleEvidence(candidate) {
   const key = process.env.GOOGLE_PLACES_API_KEY;
   if (!key) return null;
-  const body = {
-    textQuery: [candidate.name, candidate.address, candidate.city].filter(Boolean).join(", "),
-    pageSize: 3,
-    languageCode: "en"
-  };
-  if (hasCoords(candidate)) {
-    body.locationBias = { circle: { center: { latitude: candidate.coordinates[1], longitude: candidate.coordinates[0] }, radius: 5000 } };
+
+  let p = null;
+  if (candidate.googlePlaceId) {
+    const fields = [
+      "id", "displayName", "formattedAddress", "addressComponents", "location",
+      "rating", "userRatingCount", "reviews", "businessStatus",
+      "googleMapsUri", "primaryType", "types", "websiteUri",
+      "regularOpeningHours", "currentOpeningHours", "utcOffsetMinutes"
+    ].join(",");
+    const response = await fetchTimeout(
+      `https://places.googleapis.com/v1/places/${encodeURIComponent(candidate.googlePlaceId)}`,
+      { headers: { "X-Goog-Api-Key": key, "X-Goog-FieldMask": fields } }
+    );
+    p = await jsonOrThrow(response, "Google Places");
+  } else {
+    const body = {
+      textQuery: [candidate.name, candidate.address, candidate.city].filter(Boolean).join(", "),
+      pageSize: 3,
+      languageCode: "en"
+    };
+    if (hasCoords(candidate)) {
+      body.locationBias = { circle: { center: { latitude: candidate.coordinates[1], longitude: candidate.coordinates[0] }, radius: 5000 } };
+    }
+    const fields = [
+      "places.id", "places.displayName", "places.formattedAddress", "places.addressComponents", "places.location",
+      "places.rating", "places.userRatingCount", "places.reviews", "places.businessStatus",
+      "places.googleMapsUri", "places.primaryType", "places.types", "places.websiteUri",
+      "places.regularOpeningHours", "places.currentOpeningHours", "places.utcOffsetMinutes"
+    ].join(",");
+    const response = await fetchTimeout("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": fields },
+      body: JSON.stringify(body)
+    });
+    const data = await jsonOrThrow(response, "Google Places");
+    const options = (data.places || []).map(place => ({
+      raw: place,
+      name: place.displayName?.text || "",
+      address: place.formattedAddress || "",
+      coordinates: place.location ? [Number(place.location.longitude), Number(place.location.latitude)] : null
+    }));
+    const match = bestMatch(candidate, options);
+    if (!match) return null;
+    p = match.raw;
   }
-  const fields = [
-    "places.id", "places.displayName", "places.formattedAddress", "places.addressComponents", "places.location",
-    "places.rating", "places.userRatingCount", "places.reviews", "places.businessStatus",
-    "places.googleMapsUri", "places.primaryType", "places.websiteUri"
-  ].join(",");
-  const response = await fetchTimeout("https://places.googleapis.com/v1/places:searchText", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": fields },
-    body: JSON.stringify(body)
-  });
-  const data = await jsonOrThrow(response, "Google Places");
-  const options = (data.places || []).map(p => ({
-    raw: p,
-    name: p.displayName?.text || "",
-    address: p.formattedAddress || "",
-    coordinates: p.location ? [Number(p.location.longitude), Number(p.location.latitude)] : null
-  }));
-  const match = bestMatch(candidate, options);
-  if (!match) return null;
-  const p = match.raw;
   return {
     provider: "google",
     businessName: p.displayName?.text || candidate.name,
@@ -112,7 +130,10 @@ async function googleEvidence(candidate) {
     businessStatus: String(p.businessStatus || ""),
     isClosed: p.businessStatus === "CLOSED_PERMANENTLY",
     url: p.googleMapsUri || "",
-    categories: [p.primaryType].filter(Boolean),
+    categories: [p.primaryType, ...(Array.isArray(p.types) ? p.types : [])].filter(Boolean),
+    regularOpeningHours: p.regularOpeningHours || null,
+    currentOpeningHours: p.currentOpeningHours || null,
+    utcOffsetMinutes: numberOrNull(p.utcOffsetMinutes),
     reviews: (p.reviews || []).slice(0, 5).map(r => ({
       source: "google",
       rating: numberOrNull(r.rating),
@@ -182,7 +203,7 @@ async function redditEvidence(candidate) {
   if (!token) return null;
   const headers = {
     Authorization: `Bearer ${token}`,
-    "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.6 (restaurant evidence)"
+    "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v2.0.0 (restaurant evidence)"
   };
   const query = [`\"${candidate.name}\"`, candidate.city ? `\"${candidate.city}\"` : "", "(food OR restaurant OR cafe OR coffee OR pizza OR burger)"].filter(Boolean).join(" ");
   const params = new URLSearchParams({ q: query, sort: "relevance", t: "all", limit: "8", type: "link", raw_json: "1" });
@@ -231,7 +252,7 @@ async function redditAccessToken() {
     headers: {
       Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString("base64")}`,
       "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v1.9.6 (restaurant evidence)"
+      "User-Agent": process.env.REDDIT_USER_AGENT || "web:detoureats:v2.0.0 (restaurant evidence)"
     },
     body: "grant_type=client_credentials"
   });
@@ -248,15 +269,17 @@ function scoreEvidence(candidate, sources) {
   const consistencyScore = consistency(ratingSources, sentiment);
   const recencyScore = recency(snippets);
   const forum = forumEvidence(snippets.filter(s => s.source === "reddit"));
-  const foodScore = weighted([
-    [ratingScore, 0.50], [sentiment.score, 0.25], [consistencyScore, 0.15],
+  const rawFoodScore = weighted([
+    [ratingScore, 0.65], [sentiment.score, 0.12], [consistencyScore, 0.13],
     [recencyScore, 0.05], [forum.score, 0.05]
   ], 66);
   const totalReviewCount = ratingSources.reduce((n, s) => n + Number(s.reviewCount || 0), 0);
   const confidenceScore = clamp(Math.round(
-    34 + sources.length * 10 + Math.min(38, Math.log10(Math.max(1, totalReviewCount)) * 13) +
-    Math.min(10, snippets.length * 1.3) + Math.min(8, forum.mentionCount * 1.5)
+    32 + sources.length * 9 + Math.min(42, Math.log10(Math.max(1, totalReviewCount)) * 14) +
+    Math.min(8, snippets.length * 1.1) + Math.min(8, forum.mentionCount * 1.5)
   ), 30, 98);
+  const confidenceFactor = clamp((confidenceScore - 25) / 73, 0.28, 1);
+  const foodScore = 70 + (rawFoodScore - 70) * confidenceFactor;
   const google = sources.find(s => s.provider === "google");
   const yelp = sources.find(s => s.provider === "yelp");
   const googleStatus = String(google?.businessStatus || "");
@@ -279,6 +302,7 @@ function scoreEvidence(candidate, sources) {
   const matchedCity = sources.map(s => String(s.city || "").trim()).find(Boolean) || candidate.city || "";
   const matchedAddress = sources.map(s => String(s.address || "").trim()).find(Boolean) || candidate.address || "";
   const categories = [...new Set(sources.flatMap(s => Array.isArray(s.categories) ? s.categories : []).filter(Boolean))].slice(0, 8);
+  const googleHours = google?.regularOpeningHours || null;
   return {
     restaurant: { requestedName: candidate.name, matchedNames: sources.map(s => s.businessName).filter(Boolean) },
     matchedCity,
@@ -296,6 +320,8 @@ function scoreEvidence(candidate, sources) {
       negativeFoodSignals: sentiment.negativeCount
     },
     themes: sentiment.themes, concerns: sentiment.concerns,
+    regularOpeningHours: googleHours,
+    utcOffsetMinutes: numberOrNull(google?.utcOffsetMinutes),
     summary: summaryText(foodScore, totalReviewCount, ratingSources, sentiment, forum),
     businessClosed,
     closureReason,
@@ -324,7 +350,7 @@ function foodSentiment(reviews) {
   }
   return {
     score: clamp(68 + (pos - neg * 1.15) * 4.5, 28, 96), positiveCount: pos, negativeCount: neg,
-    themes: topKeys(themes, 4), concerns: topKeys(concerns, 3)
+    themes: topKeys(themes, 4, 2), concerns: topKeys(concerns, 3, 2)
   };
 }
 
@@ -423,7 +449,14 @@ function humanizeConcern(value) {
 
 function bestMatch(candidate, options) {
   const scored = options.map(o => ({ ...o, score: matchScore(candidate, o) })).sort((a, b) => b.score - a.score);
-  return scored[0]?.score >= 0.44 ? scored[0] : null;
+  const best = scored[0];
+  if (!best) return null;
+  const requested = normalize(candidate.name);
+  const generic = ["restaurant", "cafe", "coffee shop", "diner", "bakery", "pizza"].includes(requested);
+  const threshold = generic ? 0.72 : 0.58;
+  if (best.score < threshold) return null;
+  if (hasCoords(candidate) && Array.isArray(best.coordinates) && haversine(candidate.coordinates, best.coordinates) > 4) return null;
+  return best;
 }
 function matchScore(c, o) {
   const name = tokenSimilarity(c.name, o.name);
@@ -472,6 +505,7 @@ function cleanCandidate(c) {
   return {
     key: clean(c?.key, 240) || normalize([c?.name, c?.city, c?.address].filter(Boolean).join("|")),
     name: clean(c?.name, 180), address: clean(c?.address, 260), city: clean(c?.city, 120),
+    googlePlaceId: clean(c?.googlePlaceId, 180),
     coordinates: coordinates?.every(Number.isFinite) ? coordinates : null
   };
 }
@@ -501,7 +535,7 @@ function weighted(parts, fallback) {
   const weight = available.reduce((n, [, w]) => n + w, 0);
   return available.reduce((n, [s, w]) => n + s * w / weight, 0);
 }
-function topKeys(map, limit) { return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([k]) => title(k)); }
+function topKeys(map, limit, minimum = 1) { return [...map.entries()].filter(([, count]) => count >= minimum).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([k]) => title(k)); }
 function title(v) { return String(v).replace(/\b\w/g, m => m.toUpperCase()); }
 function normalize(v) { return String(v || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/&/g, " and ").replace(/[^a-zA-Z0-9]+/g, " ").toLowerCase().replace(/\s+/g, " ").trim(); }
 function clean(v, n) { return String(v || "").replace(/\s+/g, " ").trim().slice(0, n); }

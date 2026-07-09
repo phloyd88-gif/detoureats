@@ -1,10 +1,10 @@
-/* DetourEats v1.9.6 review evidence client */
+/* DetourEats v2.0.0 review evidence client */
 (function () {
   "use strict";
 
-  const CACHE_KEY = "detoureats_review_evidence_v3";
+  const CACHE_KEY = "detoureats_review_evidence_v4";
   const TTL_MS = 7 * 24 * 60 * 60 * 1000;
-  const MAX_REQUEST = 5;
+  const MAX_REQUEST = 8;
   const inflight = new Set();
   let requestActive = false;
   let providerStatus = { status: "idle", configuredProviders: [] };
@@ -13,7 +13,13 @@
     const coords = Array.isArray(candidate?.coordinates)
       ? candidate.coordinates.slice(0, 2).map(v => Number(v).toFixed(4)).join(",")
       : "";
-    return normalize([candidate?.name, candidate?.city, candidate?.address, coords].filter(Boolean).join("|")).slice(0, 240);
+    return normalize([
+      candidate?.googlePlaceId || "",
+      candidate?.name,
+      candidate?.city,
+      candidate?.address,
+      coords
+    ].filter(Boolean).join("|")).slice(0, 240);
   }
 
   function applyCached(candidates) {
@@ -36,6 +42,13 @@
     const forum = finite(evidence.components?.forumScore);
     const destination = clamp(existingDestination * .75 + food * .15 + (forum === null ? existingDestination : forum) * .10, 0, 100);
     const confirmedClosed = Boolean(evidence.businessClosed);
+    const providerOpenAtArrival = confirmedClosed
+      ? false
+      : evaluateGoogleHoursAtArrival(
+          evidence.regularOpeningHours,
+          evidence.utcOffsetMinutes,
+          candidate.arrivalTimestamp
+        );
     return {
       ...candidate,
       city: candidate.city || evidence.matchedCity || "",
@@ -48,8 +61,12 @@
       consistency: Math.round(finite(evidence.components?.consistencyScore) ?? finite(candidate.consistency) ?? 62),
       destinationWorthiness: Math.round(destination),
       evidenceSummary: evidence.summary || candidate.evidenceSummary,
-      openAtArrival: confirmedClosed ? false : candidate.openAtArrival,
-      hoursConfidence: confirmedClosed ? "provider_confirmed_closed" : candidate.hoursConfidence,
+      openAtArrival: providerOpenAtArrival === null ? candidate.openAtArrival : providerOpenAtArrival,
+      hoursConfidence: confirmedClosed
+        ? "provider_confirmed_closed"
+        : providerOpenAtArrival === null
+          ? candidate.hoursConfidence
+          : "google_regular_hours",
       operationalStatus: confirmedClosed ? "closed" : candidate.operationalStatus,
       operationalConfidence: confirmedClosed ? "high" : candidate.operationalConfidence,
       operationalReason: confirmedClosed ? (evidence.closureReason || "A connected review provider reports this business closed.") : candidate.operationalReason,
@@ -86,7 +103,8 @@
             name: c.name || "",
             city: c.city || "",
             address: c.address || "",
-            coordinates: Array.isArray(c.coordinates) ? c.coordinates : null
+            coordinates: Array.isArray(c.coordinates) ? c.coordinates : null,
+            googlePlaceId: c.googlePlaceId || ""
           }))
         })
       });
@@ -103,16 +121,53 @@
         next[result.key] = { savedAt: Date.now(), evidence: result };
       }
       writeCache(next);
-      if (typeof onUpdate === "function") onUpdate(data);
     } catch (error) {
       providerStatus = { ...providerStatus, status: "error", message: error?.message || "Review evidence could not be loaded." };
     } finally {
       unique.forEach(c => inflight.delete(candidateKey(c)));
       requestActive = false;
+      if (typeof onUpdate === "function") onUpdate({ providerStatus: getProviderStatus() });
     }
   }
 
-  function getProviderStatus() { return { ...providerStatus }; }
+  function hasPending(candidates) {
+    const cache = readCache();
+    return (candidates || []).some(candidate => {
+      const key = candidateKey(candidate);
+      const entry = cache[key];
+      return key && (!entry || !isFresh(entry));
+    });
+  }
+
+  function evaluateGoogleHoursAtArrival(hours, utcOffsetMinutes, arrivalTimestamp) {
+    const periods = Array.isArray(hours?.periods) ? hours.periods : [];
+    const timestamp = Number(arrivalTimestamp);
+    const offset = Number(utcOffsetMinutes);
+    if (!periods.length || !Number.isFinite(timestamp) || !Number.isFinite(offset)) return null;
+
+    const local = new Date(timestamp + offset * 60000);
+    const arrivalWeekMinute =
+      local.getUTCDay() * 1440 +
+      local.getUTCHours() * 60 +
+      local.getUTCMinutes();
+    const week = 7 * 1440;
+
+    return periods.some(period => {
+      const open = period?.open;
+      if (!open || !Number.isFinite(Number(open.day))) return false;
+      const start = Number(open.day) * 1440 + Number(open.hour || 0) * 60 + Number(open.minute || 0);
+      const close = period?.close;
+      if (!close || !Number.isFinite(Number(close.day))) return true;
+      let end = Number(close.day) * 1440 + Number(close.hour || 0) * 60 + Number(close.minute || 0);
+      if (end <= start) end += week;
+      const arrival = arrivalWeekMinute < start && end > week
+        ? arrivalWeekMinute + week
+        : arrivalWeekMinute;
+      return arrival >= start && arrival < end;
+    });
+  }
+
+  function getProviderStatus() { return { ...providerStatus, requestActive }; }
   function clearCache() { try { localStorage.removeItem(CACHE_KEY); } catch {} }
   function readCache() {
     try {
@@ -137,6 +192,6 @@
   function clamp(value, min, max) { return Math.max(min, Math.min(max, Number(value))); }
 
   window.DetourEatsReviewEvidence = {
-    candidateKey, applyCached, applyEvidence, schedule, getProviderStatus, clearCache
+    candidateKey, applyCached, applyEvidence, schedule, hasPending, getProviderStatus, clearCache
   };
 })();

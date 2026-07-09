@@ -1,96 +1,68 @@
-# DetourEats Review Evidence Setup
+# DetourEats API Setup — v2.0.0
 
-DetourEats v1.9.6 includes a Vercel Function at:
+## Required: Google Places
 
-`/api/restaurant-evidence`
+DetourEats uses one server-side key for two functions:
 
-API keys stay in Vercel environment variables. Never place keys in browser
-JavaScript, GitHub, or any file served directly to users.
+- `api/route-places.js` discovers stronger restaurant candidates near sampled points along the route.
+- `api/restaurant-evidence.js` retrieves rating, review, category, business-status, and hours evidence for shortlisted restaurants.
 
-## Google Places
+### Vercel variable
 
-Environment variable:
+```text
+GOOGLE_PLACES_API_KEY
+```
 
-`GOOGLE_PLACES_API_KEY`
+The variable should be enabled for **Production** and **Preview**. The Google Cloud key should be restricted to **Places API (New)**.
 
-Create or select a Google Cloud project, enable Places API (New), attach a
-billing account, create an API key, and restrict it to Places API (New).
+Do not place the key in browser JavaScript, GitHub, screenshots, or chat messages.
 
-The integration requests ratings, rating count, limited review data, business
-status, place identity, and source links. Google bills according to the highest
-requested Places field tier.
+### No additional Google setup for this release
 
-Official documentation:
+If review-backed Google results already worked in v1.9.7, the same key should work in v2.0.0. Redeploying the repository is sufficient.
 
-- https://developers.google.com/maps/documentation/places/web-service
-- https://developers.google.com/maps/documentation/places/web-service/data-fields
+### Usage monitoring
 
-## Yelp
+Because v2.0.0 adds Google-powered route discovery, it can make more Places requests than earlier releases. During beta testing:
 
-Environment variable:
+- Enable a Google Cloud billing budget and alerts.
+- Review Places API usage after several test routes.
+- Keep the API key restricted to Places API (New).
+- Do not expose the key to the client.
 
-`YELP_API_KEY`
+## Optional: Yelp
 
-The Base plan can provide ratings, review count, business identity, and closure
-status. Review excerpts require an Enhanced or Premium Yelp Places plan. The
-code automatically falls back to rating-only evidence if review excerpt access
-is denied.
+```text
+YELP_API_KEY
+```
 
-Official documentation:
+When configured, Yelp can contribute rating and review-count evidence. Review excerpts depend on the access level available to the Yelp account. The app continues to work without Yelp.
 
-- https://docs.developer.yelp.com/docs/places-intro
-- https://docs.developer.yelp.com/docs/plans
+## Optional: Reddit
 
-## Reddit forum evidence
+```text
+REDDIT_ENABLED=true
+REDDIT_CLIENT_ID
+REDDIT_CLIENT_SECRET
+REDDIT_USER_AGENT
+```
 
-Reddit is optional and disabled by default.
+Reddit remains disabled unless all required credentials are present and `REDDIT_ENABLED` is set to `true`. Only use this integration under an approved and compliant Reddit API setup.
 
-Environment variables:
+## Troubleshooting
 
-- `REDDIT_ENABLED=true`
-- `REDDIT_CLIENT_ID`
-- `REDDIT_CLIENT_SECRET`
-- `REDDIT_USER_AGENT`
+### Cards remain provisional
 
-Do not enable the Reddit adapter until Reddit approves and registers DetourEats
-for external Data API use. Reddit requires OAuth, an identifiable User-Agent,
-and compliance with its Developer Terms, Data API Terms, and Responsible
-Builder Policy.
+- Confirm `GOOGLE_PLACES_API_KEY` exists in the same Vercel project serving the site.
+- Confirm it is enabled for Production.
+- Redeploy after changing an environment variable.
+- Confirm Places API (New) is enabled in the Google Cloud project.
+- Check the Vercel Function logs for `restaurant-evidence` or `route-places` errors.
 
-Official documentation:
+### Route discovery works but review evidence does not
 
-- https://support.reddithelp.com/hc/en-us/articles/16160319875092-Reddit-Data-API-Wiki
-- https://www.reddit.com/dev/api/oauth/
+The Places key may be valid while a field, quota, billing, or restriction issue blocks the more detailed Place Details request. Check the Vercel Function log and Google Cloud API metrics.
 
-## Add environment variables in Vercel
+### Old interface remains visible
 
-1. Open the `detoureats-live` Vercel project.
-2. Open **Settings**.
-3. Open **Environment Variables**.
-4. Add each key for Production, Preview, and Development as needed.
-5. Save.
-6. Redeploy the latest production deployment.
-
-The browser caches normalized restaurant evidence for seven days to limit
-repeat API calls. Use a new incognito session or clear site storage after adding
-or changing credentials.
-
-## Scoring
-
-When review evidence is ready, the Food score uses:
-
-- 50% Bayesian-adjusted star rating
-- 25% food-specific review sentiment
-- 15% cross-source and review consistency
-- 5% review recency
-- 5% available forum evidence
-
-Unavailable components are omitted and the remaining weights are normalized.
-
-The visible Best overall Detour Score then uses:
-
-- 64% Food score
-- 36% Trip fit
-
-Without a confident provider match, the existing map-based provisional Food
-estimate remains active and is labeled accordingly.
+Confirm the footer reads `DetourEats v2.0.0`, then use a private window or remove and reinstall the home-screen app.

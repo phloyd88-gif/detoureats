@@ -1,76 +1,64 @@
-# DetourEats Complete Repository Upload
+# Deploy DetourEats v2.0.0
 
-This package is a complete replacement for the current GitHub repository files.
+This package is a complete replacement for the current DetourEats GitHub repository contents.
 
-## Upload exactly this way
+## Upload
 
-1. Open the GitHub repository.
-2. Delete the current app files and the existing `icons` folder.
-3. Extract this ZIP on your computer.
-4. Upload every extracted file and the `icons` folder together.
-5. The repository root must directly contain `index.html`.
-6. Commit the upload and wait for Vercel to finish deploying.
-7. Open the site and scroll to the bottom.
+1. Extract the ZIP on your computer.
+2. Open the GitHub repository connected to the DetourEats Vercel project.
+3. Upload every extracted file and folder to the repository root, replacing existing versions.
+4. Confirm that `index.html` is directly in the repository root, not inside an extra folder.
+5. Confirm that both serverless functions are present:
+   - `api/restaurant-evidence.js`
+   - `api/route-places.js`
+6. Commit the changes.
+7. Wait for the Vercel deployment to show **Ready**.
+8. Open DetourEats in a new private/incognito window.
+9. Confirm the footer reads `DetourEats v2.0.0`.
 
-A successful deployment displays:
+The existing `GOOGLE_PLACES_API_KEY` environment variable remains in Vercel. It does not need to be entered again.
 
-`DetourEats v1.9.6`
+## Files and folders that must be present
 
-If that version is not visible, the live site is still serving older files or
-the package was uploaded inside an extra folder.
+```text
+api/
+  restaurant-evidence.js
+  route-places.js
+assets/
+icons/
+address-search.js
+app.js
+data.js
+engine.js
+index.html
+live-route.js
+manifest.webmanifest
+place-status.js
+restaurant-intelligence.js
+review-evidence.js
+service-worker.js
+styles.css
+```
 
-## Files that must be present
+## First test
 
-- index.html
-- styles.css
-- data.js
-- engine.js
-- place-status.js
-- live-route.js
-- address-search.js
-- restaurant-intelligence.js
-- app.js
-- service-worker.js
-- manifest.webmanifest
-- README.md
-- CHANGELOG.md
-- DEPLOYMENT.md
-- icons/icon-192.png
-- icons/icon-512.png
-- icons/icon-maskable-192.png
-- icons/icon-maskable-512.png
-- icons/apple-touch-icon.png
-- icons/icon-192.svg
-- icons/icon-512.svg
+1. Run a route with several plausible restaurant towns along the way.
+2. Wait while the banner says **Checking strongest options**.
+3. Confirm **Add Stop** becomes available after the evidence pass finishes.
+4. Confirm the main recommendation shows its city and a clear **Known for** or **Food type** line.
+5. Swipe through **Road Ahead** and select an alternative.
+6. Open **Why** and confirm the detailed review evidence appears in a bottom sheet.
+7. Open **More** and confirm the trip tools appear without requiring a long page scroll.
+8. Test **Skip** and verify the replacement makes sense for the reason selected.
 
 ## Cache handling
 
-This release changes every CSS and JavaScript reference to include `v=1.9.6`.
-Its service worker immediately activates, deletes older DetourEats caches, and
-checks the network before using cached app files.
+Version 2.0.0 uses new JavaScript/CSS query strings, a new service-worker cache, a new route-discovery cache, and a new review-evidence cache. A private window is still recommended for the first test. If an installed home-screen app remains stale, remove it and install it again.
 
+## Google usage note
 
-## v1.9.6 serverless function
+This version uses Google Places during route discovery as well as during review-evidence lookup. It can therefore make more Google Places requests than v1.9.7. Keep billing budgets and usage alerts enabled in Google Cloud while testing.
 
-The repository now includes `api/restaurant-evidence.js`. Vercel should detect it automatically as a Node.js Function while serving the static application from the repository root.
+## Rollback
 
-After adding provider credentials in Vercel, redeploy production. Verify:
-
-- `/api/restaurant-evidence` returns `method_not_allowed` for a browser GET rather than a 404
-- the footer says `DetourEats v1.9.6`
-- a recommendation initially shows a provisional Food estimate and then updates to a review-backed Food score after evidence is returned
-
-## v1.9.6 mobile verification
-
-After deployment:
-
-1. Confirm the footer says **DetourEats v1.9.6**.
-2. Open the site on a phone and verify the install card appears.
-3. On Android/Chrome, use **Install App** and confirm DetourEats opens without the normal browser toolbar.
-4. On iPhone/Safari, open the install instructions and confirm they show Share → Add to Home Screen.
-5. Confirm the home-screen icon uses the new PNG artwork.
-6. Turn Wi-Fi/mobile data off and confirm the offline banner appears. The cached interface may reopen, but route preview should still explain that live data needs a connection.
-7. Turn connectivity back on and confirm the Back online message appears.
-8. Start a trip and confirm Drive Readiness updates for voice, alerts, live location, and screen-awake support.
-9. Confirm the warning says to keep DetourEats open and continue using Google Maps or Apple Maps for navigation.
-10. Rerun the v1.9.5 display checks and v1.9.4 skip/timing checks.
+To roll back, restore the prior repository commit in GitHub and redeploy it from Vercel. Environment variables do not need to be changed.

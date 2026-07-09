@@ -1,438 +1,72 @@
 # DetourEats Changelog
 
-## v1.9.6 Installable Mobile Beta
-
-- Added a visible install experience for supported browsers, including the native Android/desktop install prompt and manual iPhone Add to Home Screen instructions.
-- Added production PNG icons, a 180 px Apple touch icon, and maskable Android icons.
-- Expanded the web-app manifest with app identity, scope, portrait orientation, categories, and a trip-planning shortcut.
-- Added iPhone standalone metadata and safer notch/home-indicator spacing.
-- Added a Drive Readiness panel for live location, spoken guidance, browser alerts, and screen-awake status.
-- Uses the Screen Wake Lock API during an active trip when supported.
-- Routes browser notifications through the service worker when possible for better mobile compatibility.
-- Added offline and restored-connection banners with cached app-shell fallback.
-- Added a clear warning that the web beta must remain open and is not a replacement for the user’s navigation app.
-- Added service-worker update detection and tap-to-focus behavior for notifications.
-- Reset browser and service-worker asset versions to v1.9.6.
-
-## v1.9.5 Location and Food Focus
-
-- Shows the restaurant's town or city directly beneath its name on the main recommendation card.
-- Uses connected review themes first to display a clear **Known for** line, such as burgers and homemade food.
-- Falls back to cuisine, provider category, curated specialty, or a concise restaurant type when review themes are unavailable.
-- Adds the same location and food-focus context to every selectable Road Ahead option.
-- Removes the duplicate Google rating chip from the main recommendation card while retaining source links in the detailed evidence panel.
-- Renames the route-time label to **Added driving time** and states that food, parking, and wait time are excluded.
-- Enriches missing city and category data from matched Google Places or Yelp records when available.
-- Resets the review-evidence cache so enriched location and category data loads immediately.
-- Reset browser and service-worker asset versions to v1.9.5.
-
-## v1.9.4 Route Timing and Skip Fallbacks
-
-- Fixed Road Ahead wait-time estimates using actual `minutesAhead` values from the live route instead of multiplying candidate sequence gaps by 42 minutes.
-- Next alternatives are now ordered by real forward route timing.
-- Removed the hard minimum-score mutation from **Wait for something better**.
-- Converted all skip reasons into one-step selection intents so they do not silently change the trip’s saved mode, price, detour, or timing settings.
-- Added a safe widened fallback window when stale skip settings would otherwise produce an empty result.
-- Replaced misleading quality-bar copy with an explicit no-remaining-open-alternative message when the candidate set is genuinely exhausted.
-- Reset browser and service-worker asset versions to v1.9.4.
-
-## v1.9.3 Preference Integrity
-
-- Added a semantic validation layer for every skip reason so the replacement recommendation matches the reason selected.
-- **Need something faster** now requires an option that is no farther away and improves arrival or detour time before labeling it faster.
-- When no genuinely faster option exists, the earliest remaining restaurant is shown with an explicit **No truly faster alternative** fallback notice.
-- **Too far** prioritizes a restaurant with less added trip time and labels the fallback when none is shorter.
-- **Not hungry yet** prioritizes a meaningfully later stop but falls back instead of returning no results when the route window is sparse.
-- **Too expensive** is now a soft lower-price preference rather than a hard filter that can empty the result set.
-- **Wrong cuisine** prioritizes a genuinely different cuisine without broadly filtering generic restaurant categories.
-- **Wait for something better** continues to use a soft score target and now visibly confirms whether the target was met.
-- Added a result banner to distinguish a matched preference from a best-available fallback.
-- Reset browser and service-worker asset versions to v1.9.3.
-
-## v1.9.2 Skip Flow and Road-Ahead Selection
-
-- Added a neutral **Other** skip reason that removes only the current stop without changing trip preferences.
-- Changed **Wait for something better** from a hard score gate to a soft preference. If no stronger stop qualifies, DetourEats now shows the best available option instead of returning no results.
-- Made every restaurant in **Road Ahead** selectable by click, tap, Enter, or Space. Selecting one promotes it to the active recommendation and updates the decision logic.
-- Converted the skip-reason UI into a fixed bottom sheet with a backdrop so it opens in the current viewport without requiring scrolling.
-- Added click-outside and Escape-key dismissal for the skip sheet.
-- Reset browser and service-worker asset versions to v1.9.2.
-
-# Changelog
-
-## v1.9.1 Decision and Evidence Cleanup
-- Closed-at-arrival restaurants are now excluded from recommendations, including closures inferred from published schedules.
-- Provider-confirmed temporary or permanent closures now suppress the candidate.
-- Unknown arrival hours cap the Detour Score and change the decision prompt to **Verify hours first**.
-- Removed the duplicated review-evidence paragraph from the intelligence summary.
-- Replaced generic combined-submission wording with source-specific rating counts.
-- Added natural-language review themes and concerns.
-- Compacted the main evidence panels and reset browser caches.
-
-## v1.9.0 Review-Backed Scoring
-- Added a Vercel serverless restaurant-evidence API.
-- Added Google Places rating, review, recency, and business-status evidence.
-- Added Yelp rating and review-count evidence with optional excerpt support.
-- Added an optional Reddit OAuth forum adapter that stays disabled until approved credentials are configured.
-- Added Bayesian rating adjustment, food-specific sentiment, consistency, recency, and forum components.
-- Uses review-backed Food scores directly when a confident provider match succeeds.
-- Labels map-only scores as provisional estimates.
-- Added source links, confidence, themes, concerns, and component transparency.
-- Provider-confirmed permanent closures now enter the business-status filter.
-- Added a seven-day browser evidence cache and reset the route discovery cache.
-
-
-## v1.8.12 Restaurant Snapshot Cleanup
-- Corrected `Dair Circus` to `Dairy Circus` across all candidate paths.
-- Replaced raw company descriptions with concise structured restaurant snapshots.
-- Preserved curated signature-dish and editorial summaries.
-- Documented that internal `balanced` mode corresponds to the visible `Best overall` eating priority.
-- Invalidated the previous discovery cache.
-
-
-## v1.8.11 Routing Provider Failover
-- Added automatic routing failover from Project OSRM to FOSSGIS OpenStreetMap Routing.
-- Reuses the provider that successfully returned the baseline route for later route calculations.
-- Replaced the generic location error with a specific temporary routing-service outage message.
-- Added Creek Stone in Amsterdam to confirmed closed-business overrides.
-- Invalidated the prior restaurant discovery cache.
-
-
-## v1.8.10 Confirmed Closure Correction
-- Fixed the exact address-format mismatch that allowed G's Famous Lemon Cookies to survive validation.
-- The unique normalized business name now blocks the listing regardless of provider city or address formatting.
-- Added regression coverage for `44 E Main St`, smart apostrophes, uppercase names, and LLC suffixes.
-- Invalidated the v1.8.9 discovery cache.
-
-
-## v1.8.9 Hardened Closure Validation
-- Broadened G's Famous Lemon Cookies matching to handle punctuation, suffixes, and missing location fields.
-- Added a provider-independent final candidate validator.
-- Applies closure filtering to curated, discovered, merged, active-session, route-screened, snapshot, and rendered candidates.
-- Invalidated the previous restaurant discovery cache.
-- Added regression coverage for provider name variants and missing city/address data.
-
-
-## v1.8.8 Unified Closure Validation
-- Blocked G's Famous Lemon Cookies at 44 Main Street in Amsterdam as permanently closed.
-- Fixed the short-route Nominatim fallback bypassing known business-status overrides.
-- Added a provider-neutral candidate status assessor.
-- Applies local tester suppressions to both OpenStreetMap and fallback candidates.
-- Preserves operational confidence after fallback status validation.
-- Updated all cache-busted assets and the service-worker cache to v1.8.8.
-
-
-## v1.8.7 Full Repository Sync
-- Consolidated all current files into one complete repository replacement.
-- Added cache-busted references for every JavaScript, CSS, and manifest asset.
-- Service worker now activates immediately and deletes prior DetourEats caches.
-- App assets now use network-first loading with cached offline fallback.
-- Added a visible v1.8.7 deployment marker.
-- Added complete GitHub replacement instructions in DEPLOYMENT.md.
-
-
-## v1.8.6 Route Verification Fix
-- Fixed short-route fallback requests exceeding the overall setup timeout.
-- Runs bounded local fallback categories concurrently.
-- Preserves a verified driving route when restaurant discovery is unavailable.
-- Separates driving-route validity from restaurant-provider availability.
-- Increased the bounded setup timeout to 70 seconds.
-- Replaced misleading route-verification errors with accurate search status.
-
-
-## v1.8.5 Short Route Fallback
-- Added a dedicated local restaurant search for trips shorter than approximately 40 miles.
-- Searches compact origin, midpoint, and destination areas.
-- Retries Overpass through multiple servers using POST and GET.
-- Added a bounded Nominatim fallback when Overpass is unavailable or sparse.
-- Restricts fallback results to the actual route corridor.
-- Preserves business-status, duplicate, matrix, and exact-route checks.
-- Added active provider details to Field Tester Mode.
-
-
-## v1.8.4 Search Reliability
-- Replaced broad route-tube searches with compact waypoint-circle queries.
-- Limits practical public-map requests to two points.
-- Reduced public-search concurrency to avoid self-throttling.
-- Reset restaurant discovery cache.
-- Treats partial searches with at least five qualified options as route-ready.
-- Hides raw route diagnostics during normal use.
-- Keeps full diagnostics in Field Tester Mode.
-
-
-## v1.8.3 Business Status Hotfix
-- Blocked the former Shaker Mill Tavern restaurant listing in West Stockbridge, Massachusetts.
-- Keeps Shaker Mill Inn separate as a lodging identity.
-- Added a dedicated place-status validation module.
-- Upgraded Overpass restaurant results to include element edit metadata.
-- Added explicit closed, removed, demolished, abandoned, and disused checks.
-- Added status freshness evaluation using check dates, survey dates, source dates, and map edit timestamps.
-- Suppresses restaurant records older than six years when no current operating signal is mapped.
-- Added high, medium, and low operational-confidence classifications.
-- Added conservative Detour Score caps for weakly verified current operation.
-- Prevents low-operational-confidence records from exceptional-detour alerts.
-- Added a Closed or Stale Listings Filtered route outcome and preview count.
-- Closed, wrong-location, and duplicate reports now hide a listing immediately and persistently on that device.
-- Includes local place suppressions in field-test JSON exports.
-
-
-## v1.8.2 Route Pipeline Repair
-- Replaced whole-route Overpass queries with independently cached route-section searches.
-- Retains successful partial restaurant results when other sections fail.
-- Rotates current public Overpass endpoints by route section.
-- Calculates restaurant distance to the actual route polyline rather than sparse sample points.
-- Added route progress and route-distribution projection for every restaurant.
-- Added OSRM Table matrix screening for up to 20 restaurant candidates in one request.
-- Limits individual route-through calls to the strongest and most geographically distributed candidates.
-- Retains matrix-estimated candidates when exact route confirmation times out.
-- Added explicit search outcome states for unavailable, empty, partial, failed routing, no qualifiers, and successful results.
-- Added route-section, mapped-record, matrix-screen, exact-route, and estimated-route counts.
-- Manual Recheck Route now forces a fresh segmented restaurant search.
-- Automatic location refresh retries restaurant discovery after service failure or an empty candidate pool.
-- Removed all remaining demo controls, demo labels, and standalone curated-list fallback behavior.
-- Removed the hard-coded Myrtle Beach geocode fallback.
-- Added matrix-estimate confidence disclosure to Restaurant Intelligence.
-
-
-## v1.8.1 Hotfix
-- Removed the three prepopulated example-trip buttons.
-- Removes previously saved copies of the exact old demo trips from Recent Trips.
-- Fixed zero live candidates incorrectly switching the app back to demo mode.
-- Prevented unrelated curated restaurants from appearing on arbitrary live routes.
-- Added strict geocoding, baseline-route, discovery, and candidate-routing time budgets.
-- Added request cancellation when a new route starts or the user presses Cancel.
-- Runs optional wider discovery searches concurrently.
-- Checks candidate detour routes concurrently with a hard total budget.
-- Removed sequential re-geocoding of curated restaurants that already have coordinates.
-- Added a 36-second overall route-setup hard stop instead of indefinite loading.
-- Clears stale route state before checking a newly entered route.
-
-
-## v1.8 Beta
-- Added Mapped, Promising, Verified DetourEats, and Curated Bucket List intelligence classifications.
-- Added visible Why This Place Is Special explanations, confidence scores, evidence signals, and data gaps.
-- Added a provider-neutral adapter registry for future licensed review, editorial, and forum integrations.
-- Explicitly labels that no licensed live review provider is connected in this beta.
-- Added conservative assessment for simple machine-readable arrival-hour schedules.
-- Added filtering for closed, abandoned, removed, demolished, and disused OpenStreetMap restaurant features.
-- Strengthened duplicate detection using restaurant name plus matching address or proximity within roughly 250 meters.
-- Preserved additional Wikipedia, Wikidata, award, star, description, website, phone, and hours metadata.
-- Added optional Field Tester Mode with recommendation and candidate audit logging.
-- Added candidate-level outcome explanations and route snapshot logging.
-- Added place-error reporting for closures, hours, location, duplicates, detour accuracy, and recommendation quality.
-- Added JSON and CSV field-test exports and local test-data clearing.
-
-
-## v1.7 Beta
-- Added an always-on Exceptional Detour Override across every Eating Priority.
-- Added a strict 25-mile rare-place scan even when Eat Soon remains near the route.
-- Kept exceptional-only candidates out of the ordinary recommendation pool.
-- Added separate potential bucket-list qualification for discovered and curated restaurants.
-- Added a 45-minute maximum actual detour for exceptional-only evaluation.
-- Added early and decision-point exceptional voice and browser alerts.
-- Added a Rare Detour Opportunity card with Add Stop and Keep Current Plan actions.
-- Added per-trip dismissal so a rejected exceptional restaurant is not announced again.
-- Added a default-on preference for rare-place alerts.
-- Added explicit evidence caveats for route-discovered bucket-list candidates.
-
-
-## v1.6 Beta
-- Replaced the fixed five-mile discovery boundary with adaptive practical, extended, and destination search tiers.
-- Added evidence-supported restaurant discovery up to about 15 miles from the route for Best Overall.
-- Added rare destination-candidate discovery up to about 25 miles from the route for Worth Waiting For and sparse routes.
-- Kept Eat Soon focused near the route, with limited automatic widening only when options are sparse.
-- Added stronger OpenStreetMap evidence requirements for wider candidates.
-- Added actual-detour evaluation ceilings that vary by Eating Priority.
-- Added escalating food-quality and evidence thresholds as added time and distance increase.
-- Added Practical, Extended Detour, and Destination Detour labels throughout the recommendation card, timeline, route preview, and trust details.
-- Added route-preview explanations of which adaptive search stages were used.
-- Updated route-preview caching so changing Eating Priority recalculates the appropriate search scope.
-
-
-## v1.5 Beta
-- Replaced isolated 3.1-mile search circles with a continuous route corridor approximately five miles on each side.
-- Increased route sampling from a maximum of 14 to 28 points.
-- Added spoken recommendation alerts at approaching, soon, and decide-now stages.
-- Connected browser notifications to recommendation approach events.
-- Added Add Stop & Navigate with Google Maps and Apple Maps multistop handoff.
-- Added remembered navigation-app preference.
-- Added one-tap post-stop Worth It feedback and optional quick reasons.
-- Added local preference learning for cuisine, chain/independent, stop type, local, and regional signals.
-- Added learned preference fit to Detour Score while retaining quality guardrails.
-- Clearly labeled foreground-only alert limitations pending native conversion.
-
-
-## v1.4 Beta
-- Added address and place autocomplete to Starting Point and Destination.
-- Added selectable full-address, street, city, landmark, and business suggestions.
-- Added keyboard, mouse, and mobile selection support.
-- Added exact-coordinate routing from selected suggestions.
-- Added green selected-address confirmation and search status messages.
-- Added conservative debouncing, request cancellation, result limits, and browser caching.
-- Preserved manual-entry fallback when autocomplete is unavailable.
-- Preserved selected coordinates in recent typed trips and through route swapping.
-- Fixed Recheck Route for trips that begin from a typed starting point.
-
-
-## v1.3 Beta
-- Added editable starting point and destination fields for arbitrary U.S. trips.
-- Added current location as an optional origin rather than a route requirement.
-- Added origin/destination swap for typed routes.
-- Added route validation and a pre-trip summary with distance, drive time, and food-option counts.
-- Added recent-trip history and quick example routes.
-- Added cached preview reuse so Trust Us does not repeat a completed route search.
-- Removed Amsterdam and Myrtle Beach as functional input defaults.
-- Prevented arbitrary-route failures from silently substituting the original curated corridor.
-- Optimized curated-stop processing so unrelated corridor restaurants are filtered before address lookup.
-
-
-## v1.2 Beta
-- Added restaurant discovery across any live route using OpenStreetMap and Overpass.
-- Added route-corridor sampling and geographically distributed discovery candidates.
-- Combined discovered venues with relevant curated recommendations.
-- Added common-chain identification and available cuisine, address, website, phone, and hours metadata.
-- Added Curated and Route-discovered provenance labels throughout the app.
-- Added conservative discovery-confidence scoring caps so incomplete data cannot produce elite Detour Scores.
-- Added unknown-hours treatment and explicit unverified-hours messaging.
-- Added discovery counts and fallback status to Driver Mode and the trip timeline.
-
-
-## v1.1 Beta
-- Made Detour Score a prominent main-card visual.
-- Added plain-English score meaning and comparison with the next option.
-- Added visible Food, Trip Fit, and Time Fit components.
-- Added a Trust Snapshot with route mode, restaurant confidence, hours status, verification date, and operational risk.
-- Made timeline scores more prominent.
-- Added a manual Recheck Route action for live-location trips.
-
-
-## v1.0 Beta
-- Combined Trip Timeline, Food Zones, Live Location Beta, and live route calculations.
-- Added Use My Location with browser permission handling.
-- Added no-account OpenStreetMap geocoding and OSRM route calculations.
-- Added real route order, ETA, distance ahead, added trip time, and decision timing.
-- Added automatic passed-stop removal and controlled location-based refreshes.
-- Added next-six-stop timeline, current/best-if-wait/backup roles, and food-gap warnings.
-- Preserved the complete curated demo fallback when live services are unavailable.
-
-
-## v0.9
-- Added Stop Here versus Skip and Wait decision consequences.
-- Added the next qualifying restaurant, approximate wait, score comparison, and route outlook.
-- Added stronger stop-or-wait messaging based on what comes next.
-- Added browser persistence for trip preferences.
-- Built from the stable v0.8.1 interface with no API or account requirement.
-
-
-## v0.8.1
-- Renamed Style to Eating Priority.
-- Added in-drive priority controls.
-- Replaced Find Something Faster with Eat Sooner.
-- Fixed Eat Sooner so it favors the earliest qualifying open stop and does not automatically skip the current recommendation.
-- Renamed modes to Best overall, Eat soon, and Worth waiting for.
-
-
-## v0.8
-- Added Driver Mode route-progress panel.
-- Added simulated remaining time, next food zone, and decision countdown.
-- Simplified the main recommendation card for at-a-glance use.
-- Added confidence and operational-risk indicators.
-- Hid technical details by default behind Tell Me Why.
-- Added a one-tap Find Something Faster action.
-
-
-## v0.7
-- Added optional trip preferences.
-- Added preference-fit scoring and explanations.
-- Added reason-based skipping that changes subsequent recommendations.
-- Added cuisine exclusion, budget mode, quick-stop mode, defer logic, and a raised quality bar.
-- Added active-preference and latest-adjustment details to Trip Context.
-- Fixed Food Adventure so its style value is handled consistently.
-
-
-## v0.6.1
-- Fixed Hungry Soon showing No rush.
-- User-selected style now directly influences meal urgency.
-- Added Style applied to the Trip Context panel.
-
-
-## v0.6
-- Added meal urgency states.
-- Added route-scarcity analysis.
-- Added stop-now, eat-soon, and keep-driving decision messaging.
-- Added trip-context details showing urgency and route outlook.
-
-
-## v0.5.2
-- Fixed Hungry Soon still selecting Bonnie Blue.
-- Added a real earlier open stop in Binghamton.
-- Hungry Soon now explicitly selects the earliest open candidate that clears the quality threshold.
-
-
-## v0.5.1
-- Fixed trip style selector so it materially changes recommendations.
-- Added urgency scoring.
-- Hungry Soon now favors earlier acceptable stops.
-- Food Adventure now tolerates more waiting for standout restaurants.
-- Added style-specific explanation text.
-
-
-## v0.5
-- Replaced fictional restaurants with a curated real test corridor.
-- Added source links, data confidence, verification dates, addresses, and published hours.
-- Added operational-risk warnings for sellouts, limited hours, and payment restrictions.
-- Clearly separated verified restaurant facts from editorial DetourEats scoring and estimated routing data.
-
-
-## v0.4
-- Added a dedicated Detour Score engine.
-- Added richer sample route data with food reputation, uniqueness, confidence, consistency, and destination-worthiness.
-- Added score explanation breakdown: Food, Trip Fit, Time, and Scarcity.
-- Added guardrails so convenience cannot make mediocre food look elite.
-- Improved Best Available logic so the app still makes a decision when the traveler needs to eat.
-
-
-## v0.3.2
-- Replaced weak Best Available copy that implied the driver was still guessing.
-- Updated wording to reinforce that DetourEats makes the decision.
-
-
-## v0.3.1
-- Fixed data/engine wiring bug causing the app to show only Keep Driving.
-- Explicitly exposed candidate data to the browser window.
-- Mapped app fields to existing data fields like seq, estimatedAddedMinutes, famousFor, and arrivalClock.
-
-
-## v0.3
-- Added clearer trip states and recommendation tiers.
-- Improved recommendation copy and practical/best-available logic.
-- Added safer fallback recommendation behavior.
-- Improved skip behavior and details panel language.
-- Left the temporary DE logo in place to keep the live site stable.
-
-
-## v0.2.3
-- Replaced the broken detailed illustrated icon with a clean temporary DE mark.
-- Kept the green brand theme.
-- This is intended as a stable live-site icon while the final logo is refined.
-
-
-## v0.2.2
-- Replaced the too-abstract temporary icon with a more literal road/fork/food icon.
-- Enlarged the header icon slightly for better readability.
-
-
-## v0.2.1
-- Simplified the app icon/logo so it reads cleanly at small size.
-- Removed the overly detailed landscape-style SVG mark from v0.2.
-
-
-## v0.2
-- Green visual theme.
-- New SVG app icon.
-- Cleaner public setup flow.
-- Debug/simulation controls hidden behind a toggle.
-- Updated manifest and cache name.
-
-## v0.1
-- Initial prototype with simulated route data and Detour Score recommendation engine.
+## v2.0.0 — Results and Driver Interface Rebuild
+
+### Restaurant discovery
+
+- Added `api/route-places.js` for server-side Google Places discovery around sampled route points.
+- Merged Google Places and OpenStreetMap candidates before route screening.
+- Added Google place IDs, categories, review counts, business status, city, price level, and mapped hours to discovery records.
+- Increased the evidence shortlist from five to eight candidates and diversified it across score, proximity, and route position.
+- Preserved public-map fallback behavior when Google route discovery is unavailable.
+
+### Food evidence and ranking
+
+- Place Details now uses a known Google place ID whenever available instead of repeating fuzzy text matching.
+- Tightened fallback business-identity matching.
+- Parallelized shortlisted evidence requests.
+- Reduced the influence of tiny or low-confidence rating samples by shrinking the Food score toward a neutral baseline.
+- Requires repeated mentions before labeling a food theme or concern as recurring.
+- Added Google regular-hours evaluation at the candidate’s expected arrival time.
+- Added evidence confidence and review-backed status as ranking tie-breakers.
+- Applies a modest provisional-data penalty when multiple review-backed alternatives are available.
+- Reset the review-evidence cache.
+
+### Interface
+
+- Rebuilt Drive Mode around one compact recommendation card.
+- Added a fixed bottom action bar with **Add Stop**, **Skip**, **Why**, and **More**.
+- Moved detailed evidence to a **Why** bottom sheet.
+- Moved secondary trip controls to a **More** bottom sheet.
+- Converted Road Ahead to a horizontal, swipeable, selectable carousel.
+- Removed automatic page jumping when a Road Ahead alternative is selected.
+- Collapsed Drive Readiness on the setup screen.
+- Added a visible **Checking strongest options** state and temporarily disables **Add Stop** while live evidence is resolving.
+- Reduced routine diagnostic text in normal Drive Mode.
+
+### Branding and mobile behavior retained
+
+- Preserved the approved DetourEats road-and-fork logo and installed-app icons.
+- Preserved PWA installation, safe-area handling, wake lock, offline notices, and service-worker notifications from v1.9.6–v1.9.7.
+
+## v1.9.7
+
+- Added the approved DetourEats logo throughout the app and installed-app assets.
+
+## v1.9.6
+
+- Added installable PWA behavior, Drive Readiness, wake lock, offline notices, and mobile safe-area improvements.
+
+## v1.9.5
+
+- Added city and food-focus information, removed duplicate rating display, and clarified added driving time.
+
+## v1.9.4
+
+- Corrected Road Ahead time-gap calculations and soft-fallback behavior after **Wait for something better**.
+
+## v1.9.3
+
+- Added skip-reason integrity checks and labeled best-available fallbacks.
+
+## v1.9.2
+
+- Added a neutral **Other** skip reason, clickable Road Ahead choices, and in-place skip reasons.
+
+## v1.9.1
+
+- Improved closure handling and condensed review-backed evidence copy.
+
+## v1.9.0
+
+- Added the server-side Google/Yelp/optional Reddit restaurant-evidence framework and review-backed Food scoring.

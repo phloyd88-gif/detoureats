@@ -1,4 +1,4 @@
-/* DetourEats v1.9.6 Review-Backed Scoring Engine
+/* DetourEats v2.0.0 Review-Backed Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -34,7 +34,7 @@ It is restaurant quality filtered through trip fit.
 
     let scored = visible
       .map(candidate => scoreCandidate(candidate, settings, normalized))
-      .sort((a, b) => b.detourScore - a.detourScore);
+      .sort(compareScoredCandidates);
 
     // Skip reasons are one-step preferences, not hard filters. If earlier trip
     // adjustments leave the normal candidate window empty, widen the search to
@@ -45,7 +45,7 @@ It is restaurant quality filtered through trip fit.
       visible = filterCandidatesForSkipFallback(normalized, settings);
       scored = visible
         .map(candidate => scoreCandidate(candidate, settings, normalized))
-        .sort((a, b) => b.detourScore - a.detourScore);
+        .sort(compareScoredCandidates);
       usedSkipFallbackWindow = scored.length > 0;
     }
 
@@ -206,7 +206,7 @@ It is restaurant quality filtered through trip fit.
       };
     }
 
-    const byScore = [...candidates].sort((a, b) => b.detourScore - a.detourScore);
+    const byScore = [...candidates].sort(compareScoredCandidates);
     const referenceAhead = number(intent.referenceMinutesAhead, Infinity);
     const referenceAdded = number(intent.referenceAddedMinutes, Infinity);
     const referencePrice = priceRank(intent.referencePriceLevel);
@@ -772,6 +772,20 @@ It is restaurant quality filtered through trip fit.
     // making a weak restaurant look elite.
     detourScore += (preferenceFit - 75) * 0.18;
 
+    // Once the route has multiple review-backed options, do not let a thin
+    // provisional map record win merely because its route fit is convenient.
+    // This stabilizes the final recommendation after evidence finishes loading.
+    const reviewBackedCount = (allCandidates || []).filter(candidate =>
+      candidate?.reviewEvidence?.status === "ready" &&
+      Number.isFinite(Number(candidate?.reviewEvidence?.foodScore))
+    ).length;
+    if (reviewBacked) {
+      const evidenceConfidence = Number(c.reviewEvidence?.confidenceScore || 0);
+      detourScore += evidenceConfidence >= 88 ? 2 : evidenceConfidence >= 68 ? 1 : 0;
+    } else if (reviewBackedCount >= 2) {
+      detourScore -= 5;
+    }
+
     const detourGate = scoreAdaptiveDetourGate(
       c,
       restaurantQuality,
@@ -908,6 +922,27 @@ It is restaurant quality filtered through trip fit.
       styleApplied: style,
       scoreExplanation
     };
+  }
+
+  function compareScoredCandidates(a, b) {
+    const scoreDifference = Number(b.detourScore || 0) - Number(a.detourScore || 0);
+    if (scoreDifference) return scoreDifference;
+
+    const aReady = a?.reviewEvidence?.status === "ready" ? 1 : 0;
+    const bReady = b?.reviewEvidence?.status === "ready" ? 1 : 0;
+    if (aReady !== bReady) return bReady - aReady;
+
+    const confidenceDifference =
+      Number(b?.reviewEvidence?.confidenceScore || b?.reviewConfidence || 0) -
+      Number(a?.reviewEvidence?.confidenceScore || a?.reviewConfidence || 0);
+    if (confidenceDifference) return confidenceDifference;
+
+    const addedDifference =
+      Number(a?.estimatedAddedMinutes ?? 999) -
+      Number(b?.estimatedAddedMinutes ?? 999);
+    if (addedDifference) return addedDifference;
+
+    return candidateMinutesAhead(a) - candidateMinutesAhead(b);
   }
 
   function chooseByChainPolicy(scored, settings) {

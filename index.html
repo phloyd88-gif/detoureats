@@ -11,10 +11,10 @@
   <meta name="apple-mobile-web-app-title" content="DetourEats">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>DetourEats</title>
-  <link rel="manifest" href="manifest.webmanifest?v=1.9.6">
+  <link rel="manifest" href="manifest.webmanifest?v=2.0.0">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=1.9.6">
+  <link rel="stylesheet" href="styles.css?v=2.0.0">
 </head>
 <body>
   <div id="connectionBanner" class="connection-banner hidden" role="status" aria-live="polite">
@@ -26,12 +26,10 @@
   </div>
 
   <main class="app-shell">
-    <section class="brand-bar">
-      <img class="brand-icon" src="icons/icon-192.png" alt="" aria-hidden="true">
-      <div>
-        <h1>DetourEats</h1>
-        <p>Know when the food is worth the detour.</p>
-      </div>
+    <section class="brand-bar" aria-label="DetourEats">
+      <h1 class="sr-only">DetourEats</h1>
+      <img class="brand-logo" src="assets/detoureats-logo-horizontal.png" alt="DetourEats">
+      <p>Know when the food is worth the detour.</p>
     </section>
 
     <section id="setupScreen" class="screen">
@@ -241,16 +239,17 @@
           <button id="previewRouteButton" class="secondary" type="button">Preview Route</button>
           <button id="startTripButton" class="primary" type="button">Trust Us</button>
         </div>
-        <section class="trip-alert-setup drive-readiness-card" aria-label="Drive readiness">
-          <div class="drive-readiness-heading">
+        <details class="trip-alert-setup drive-readiness-card" aria-label="Drive readiness">
+          <summary class="drive-readiness-summary">
             <div>
               <span>Drive readiness</span>
-              <strong>Set up hands-free assistance</strong>
-              <small>DetourEats can speak and alert you while it remains open. The screen will be kept awake when your browser supports it.</small>
+              <strong>Voice, alerts, and screen awake</strong>
             </div>
-            <span id="readinessSummaryBadge" class="readiness-summary-badge">Optional setup</span>
-          </div>
+            <span id="readinessSummaryBadge" class="readiness-summary-badge">Optional</span>
+          </summary>
 
+          <div class="drive-readiness-content">
+          <p class="drive-readiness-intro">DetourEats can speak and alert you while it remains open. The screen will be kept awake when your browser supports it.</p>
           <div class="readiness-list">
             <div>
               <span class="readiness-dot" id="locationReadinessDot" aria-hidden="true"></span>
@@ -275,7 +274,8 @@
             <button id="enableNotificationsButton" class="secondary compact-action" type="button">Enable Alerts</button>
           </div>
           <p class="background-limit-note"><strong>Important:</strong> Do not rely on this beta as your navigation app. Keep Google Maps or Apple Maps running for directions, and keep DetourEats open for food recommendations.</p>
-        </section>
+          </div>
+        </details>
 
         <p class="trust-note">Typed starting points and current location both use live beta routing. No fixed Amsterdam-to-Myrtle Beach route is required.</p>
       </div>
@@ -342,6 +342,13 @@
         </div>
       </section>
 
+      <section id="resultRefinementBanner" class="result-refinement-banner hidden" aria-live="polite">
+        <span class="refinement-spinner" aria-hidden="true"></span>
+        <div>
+          <strong>Checking the strongest options</strong>
+          <small>Ratings, review evidence, business identity, and route timing are being reconciled before the recommendation settles.</small>
+        </div>
+      </section>
 
       <section id="exceptionalOpportunityPanel" class="exceptional-opportunity-panel hidden" aria-live="assertive">
         <div class="exceptional-opportunity-top">
@@ -399,19 +406,14 @@
 
 
 
-      <div class="button-row driver-primary-actions">
-        <button id="takeMeThereButton" class="primary">Add Stop &amp; Navigate</button>
+      <div class="driver-sticky-actions" aria-label="Recommendation actions">
+        <button id="takeMeThereButton" class="primary">Add Stop</button>
         <button id="skipButton" class="secondary">Skip</button>
+        <button id="whyButton" class="driver-action" type="button" aria-expanded="false">Why</button>
+        <button id="moreActionsButton" class="driver-action" type="button" aria-expanded="false">More</button>
       </div>
 
-      <div class="driver-secondary-actions">
-        <button id="whyButton" class="driver-action" type="button" aria-expanded="false">Tell Me Why</button>
-        <button id="fasterButton" class="driver-action" type="button">Eat Sooner</button>
-        <button id="recheckRouteButton" class="driver-action hidden" type="button">Recheck Route</button>
-        <button id="rateLastStopButton" class="driver-action hidden" type="button">Rate Last Stop</button>
-        <button id="reportPlaceButton" class="driver-action" type="button">Report Place</button>
-      </div>
-
+      <div id="driveSheetBackdrop" class="drive-sheet-backdrop hidden" aria-hidden="true"></div>
 
       <div id="skipReasonBackdrop" class="skip-reason-backdrop hidden" aria-hidden="true"></div>
       <section id="skipReasonPanel" class="skip-reason-panel hidden" aria-live="polite" role="dialog" aria-modal="true" aria-labelledby="skipReasonTitle">
@@ -434,6 +436,22 @@
         </div>
       </section>
 
+      <section id="tripToolsPanel" class="drive-bottom-sheet hidden" role="dialog" aria-modal="true" aria-labelledby="tripToolsTitle">
+        <div class="sheet-handle" aria-hidden="true"></div>
+        <div class="drive-sheet-heading">
+          <div>
+            <span>Trip tools</span>
+            <strong id="tripToolsTitle">Adjust this drive</strong>
+          </div>
+          <button id="closeTripToolsButton" class="skip-close" type="button" aria-label="Close trip tools">×</button>
+        </div>
+        <div class="trip-tools-grid">
+          <button id="fasterButton" class="trip-tool-button" type="button"><strong>Eat sooner</strong><span>Favor the earliest reasonable stop</span></button>
+          <button id="recheckRouteButton" class="trip-tool-button hidden" type="button"><strong>Recheck route</strong><span>Refresh route and restaurant timing</span></button>
+          <button id="rateLastStopButton" class="trip-tool-button hidden" type="button"><strong>Rate last stop</strong><span>Help future recommendations</span></button>
+          <button id="reportPlaceButton" class="trip-tool-button" type="button"><strong>Report place</strong><span>Flag hours, closure, location, or quality</span></button>
+        </div>
+      </section>
 
       <section id="stopFeedbackPanel" class="stop-feedback-panel hidden" aria-live="polite">
         <div class="feedback-header">
@@ -457,7 +475,7 @@
         </div>
       </section>
 
-      <section id="detailsPanel" class="panel details-panel hidden"></section>
+      <section id="detailsPanel" class="panel details-panel drive-bottom-sheet hidden"></section>
 
 
       <section id="fieldTestPanel" class="field-test-panel hidden" aria-live="polite">
@@ -482,8 +500,8 @@
         </div>
 
         <small>
-          Review providers are not connected in this beta. This audit uses curated data,
-          OpenStreetMap metadata, route calculations, and your test feedback.
+          This audit uses connected review evidence when available, Google Places and OpenStreetMap discovery,
+          route calculations, and your test feedback.
         </small>
       </section>
 
@@ -573,16 +591,16 @@
   </div>
 
   <div class="build-version" aria-label="Application version">
-    DetourEats v1.9.6
+    DetourEats v2.0.0
   </div>
 
-  <script src="data.js?v=1.9.6"></script>
-  <script src="engine.js?v=1.9.6"></script>
-  <script src="review-evidence.js?v=1.9.6"></script>
-  <script src="place-status.js?v=1.9.6"></script>
-  <script src="live-route.js?v=1.9.6"></script>
-  <script src="address-search.js?v=1.9.6"></script>
-  <script src="restaurant-intelligence.js?v=1.9.6"></script>
-  <script src="app.js?v=1.9.6"></script>
+  <script src="data.js?v=2.0.0"></script>
+  <script src="engine.js?v=2.0.0"></script>
+  <script src="review-evidence.js?v=2.0.0"></script>
+  <script src="place-status.js?v=2.0.0"></script>
+  <script src="live-route.js?v=2.0.0"></script>
+  <script src="address-search.js?v=2.0.0"></script>
+  <script src="restaurant-intelligence.js?v=2.0.0"></script>
+  <script src="app.js?v=2.0.0"></script>
 </body>
 </html>

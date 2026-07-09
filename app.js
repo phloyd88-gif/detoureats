@@ -1,4 +1,4 @@
-/* DetourEats v1.9.6 Restaurant Identity and Food Focus
+/* DetourEats v2.0.0 Restaurant Identity and Food Focus
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -61,6 +61,7 @@ const els = {
   tripTitle: document.getElementById("tripTitle"),
   tripSubtitle: document.getElementById("tripSubtitle"),
   driverStatusPanel: document.getElementById("driverStatusPanel"),
+  resultRefinementBanner: document.getElementById("resultRefinementBanner"),
   routeProgressBar: document.getElementById("routeProgressBar"),
   routeProgressText: document.getElementById("routeProgressText"),
   liveRouteBadge: document.getElementById("liveRouteBadge"),
@@ -89,6 +90,10 @@ const els = {
   takeMeThereButton: document.getElementById("takeMeThereButton"),
   skipButton: document.getElementById("skipButton"),
   whyButton: document.getElementById("whyButton"),
+  moreActionsButton: document.getElementById("moreActionsButton"),
+  driveSheetBackdrop: document.getElementById("driveSheetBackdrop"),
+  tripToolsPanel: document.getElementById("tripToolsPanel"),
+  closeTripToolsButton: document.getElementById("closeTripToolsButton"),
   fasterButton: document.getElementById("fasterButton"),
   recheckRouteButton: document.getElementById("recheckRouteButton"),
   rateLastStopButton: document.getElementById("rateLastStopButton"),
@@ -176,6 +181,10 @@ let state = {
   currentPick: null,
   currentResult: null,
   detailsOpen: false,
+  tripToolsOpen: false,
+  reviewRefining: false,
+  reviewRefinementKey: "",
+  reviewRefinementTimer: null,
   notificationsEnabled: false,
   voiceEnabled: false,
   installedApp: false,
@@ -557,6 +566,7 @@ function render() {
       : trip.label;
 
   renderDriverStatus(pick, result, trip);
+  renderResultRefinement();
   renderExceptionalOpportunity(exceptionalOpportunity, pick);
   renderDecisionCard(pick, trip, copy);
   renderDecisionConsequences(pick, result, trip);
@@ -571,20 +581,28 @@ function render() {
   }
 
   updatePriorityChips();
-  els.takeMeThereButton.disabled = !pick;
+  els.takeMeThereButton.disabled = !pick || state.reviewRefining;
   els.skipButton.disabled = !pick;
   els.whyButton.disabled = !pick;
   els.fasterButton.disabled = !pick;
   els.recheckRouteButton.disabled = state.routingBusy || state.routingMode !== "live";
   els.recheckRouteButton.classList.toggle("hidden", state.routingMode !== "live");
-  els.recheckRouteButton.textContent = state.routingBusy ? "Rechecking…" : "Recheck Route";
+  els.recheckRouteButton.innerHTML = state.routingBusy
+    ? "<strong>Rechecking…</strong><span>Refreshing route and restaurant timing</span>"
+    : "<strong>Recheck route</strong><span>Refresh route and restaurant timing</span>";
   els.rateLastStopButton.classList.toggle("hidden", !state.pendingVisit);
   els.reportPlaceButton.disabled = !pick;
   els.fieldTestPanel.classList.toggle("hidden", !state.testerMode);
-  els.takeMeThereButton.textContent = pick ? "Add Stop & Navigate" : "Keep Watching";
-  els.whyButton.textContent = state.detailsOpen ? "Hide Details" : "Tell Me Why";
+  els.takeMeThereButton.textContent = state.reviewRefining
+    ? "Checking…"
+    : pick
+      ? "Add Stop"
+      : "Keep Watching";
+  els.whyButton.textContent = state.detailsOpen ? "Close" : "Why";
   els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
   els.detailsPanel.classList.toggle("hidden", !state.detailsOpen);
+  els.tripToolsPanel?.classList.toggle("hidden", !state.tripToolsOpen);
+  updateDriveSheetBackdrop();
   updateTripAlertStatus();
   maybeDeliverExceptionalAlert(exceptionalOpportunity);
   maybeDeliverApproachAlert(pick, result);
@@ -606,17 +624,112 @@ function scheduleReviewEvidence(candidates) {
     !service?.schedule ||
     state.routingMode !== "live"
   ) {
+    state.reviewRefining = false;
+    renderResultRefinement();
     return;
   }
 
+  const shortlist = buildEvidenceShortlist(candidates);
+  if (!shortlist.length || !service.hasPending?.(shortlist)) {
+    state.reviewRefining = false;
+    renderResultRefinement();
+    return;
+  }
+
+  const key = shortlist
+    .map(candidate => service.candidateKey?.(candidate) || candidate.id || candidate.name)
+    .join("|");
+
+  if (state.reviewRefinementKey === key && service.getProviderStatus?.().requestActive) {
+    return;
+  }
+
+  state.reviewRefinementKey = key;
+  state.reviewRefining = true;
+  renderResultRefinement();
+  els.takeMeThereButton.disabled = true;
+  els.takeMeThereButton.textContent = "Checking…";
+
+  if (state.reviewRefinementTimer) {
+    clearTimeout(state.reviewRefinementTimer);
+  }
+  state.reviewRefinementTimer = setTimeout(() => {
+    state.reviewRefining = false;
+    renderResultRefinement();
+    if (state.started) render();
+  }, 9000);
+
   service.schedule(
-    candidates,
+    shortlist,
     () => {
+      if (state.reviewRefinementTimer) {
+        clearTimeout(state.reviewRefinementTimer);
+        state.reviewRefinementTimer = null;
+      }
+      state.reviewRefining = false;
       if (state.started) {
         render();
       }
     }
   );
+}
+
+function buildEvidenceShortlist(candidates) {
+  const normalized = (candidates || [])
+    .filter(Boolean)
+    .map(candidate => ({
+      ...candidate,
+      _routeMinutes: Number(candidate.minutesAhead ?? candidate.decisionMinutes ?? 999),
+      _score: Number(candidate.detourScore ?? candidate.score ?? 0),
+      _bucket: Number(candidate.routeBucket ?? Math.floor(Number(candidate.routeProgress || 0) * 8))
+    }));
+
+  const unique = new Map();
+  for (const candidate of normalized) {
+    const id = String(candidate.id || candidate.name || "");
+    if (!id) continue;
+    const existing = unique.get(id);
+    if (!existing || candidate._score > existing._score) unique.set(id, candidate);
+  }
+
+  const pool = [...unique.values()];
+  const selected = [];
+  const selectedIds = new Set();
+  const add = candidate => {
+    if (!candidate) return;
+    const id = String(candidate.id || candidate.name || "");
+    if (!id || selectedIds.has(id)) return;
+    selectedIds.add(id);
+    selected.push(candidate);
+  };
+
+  [...pool]
+    .sort((a, b) => b._score - a._score || a._routeMinutes - b._routeMinutes)
+    .slice(0, 4)
+    .forEach(add);
+
+  [...pool]
+    .sort((a, b) => a._routeMinutes - b._routeMinutes || b._score - a._score)
+    .slice(0, 2)
+    .forEach(add);
+
+  const byBucket = new Map();
+  for (const candidate of pool) {
+    const bucket = Number.isFinite(candidate._bucket) ? candidate._bucket : 0;
+    const current = byBucket.get(bucket);
+    if (!current || candidate._score > current._score) byBucket.set(bucket, candidate);
+  }
+  [...byBucket.values()]
+    .sort((a, b) => b._score - a._score)
+    .forEach(add);
+
+  return selected.slice(0, 8);
+}
+
+function renderResultRefinement() {
+  if (!els.resultRefinementBanner) return;
+  els.resultRefinementBanner.classList.toggle("hidden", !state.reviewRefining);
+  els.decisionCard?.classList.toggle("is-refining", state.reviewRefining);
 }
 
 function renderDriverStatus(pick, result, trip) {
@@ -672,10 +785,15 @@ function renderDriverStatus(pick, result, trip) {
         ? `${discoverySummary} · rare-place scan on`
         : discoverySummary;
 
+    const shouldShowRoutingMessage = Boolean(
+      state.routingMessage ||
+      state.routingBusy ||
+      ["partial", "unavailable"].includes(String(metrics.discoveryStatus || ""))
+    );
     els.routingProgressMessage.textContent =
       state.routingMessage ||
       `${discoveryWithExceptional} · updated ${formatRelativeUpdate(metrics.updatedAt)}`;
-    els.routingProgressMessage.classList.remove("hidden");
+    els.routingProgressMessage.classList.toggle("hidden", !shouldShowRoutingMessage);
     return;
   }
 
@@ -798,16 +916,44 @@ function formatDuration(totalMinutes) {
 
 function toggleWhyDetails() {
   if (!state.currentPick) return;
-  state.detailsOpen = !state.detailsOpen;
+  const willOpen = !state.detailsOpen;
+  state.tripToolsOpen = false;
+  state.detailsOpen = willOpen;
   els.detailsPanel.classList.toggle("hidden", !state.detailsOpen);
-  els.whyButton.textContent = state.detailsOpen ? "Hide Details" : "Tell Me Why";
+  els.tripToolsPanel?.classList.add("hidden");
+  els.whyButton.textContent = state.detailsOpen ? "Close" : "Why";
   els.whyButton.setAttribute("aria-expanded", String(state.detailsOpen));
+  els.moreActionsButton?.setAttribute("aria-expanded", "false");
+  updateDriveSheetBackdrop();
+}
 
-  if (state.detailsOpen) {
-    setTimeout(() => {
-      els.detailsPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
-  }
+function toggleTripTools() {
+  const willOpen = !state.tripToolsOpen;
+  state.detailsOpen = false;
+  state.tripToolsOpen = willOpen;
+  els.detailsPanel?.classList.add("hidden");
+  els.tripToolsPanel?.classList.toggle("hidden", !state.tripToolsOpen);
+  els.whyButton.textContent = "Why";
+  els.whyButton.setAttribute("aria-expanded", "false");
+  els.moreActionsButton?.setAttribute("aria-expanded", String(state.tripToolsOpen));
+  updateDriveSheetBackdrop();
+}
+
+function closeDriveSheets() {
+  state.detailsOpen = false;
+  state.tripToolsOpen = false;
+  els.detailsPanel?.classList.add("hidden");
+  els.tripToolsPanel?.classList.add("hidden");
+  els.whyButton.textContent = "Why";
+  els.whyButton.setAttribute("aria-expanded", "false");
+  els.moreActionsButton?.setAttribute("aria-expanded", "false");
+  updateDriveSheetBackdrop();
+}
+
+function updateDriveSheetBackdrop() {
+  const open = Boolean(state.detailsOpen || state.tripToolsOpen);
+  els.driveSheetBackdrop?.classList.toggle("hidden", !open);
+  document.body.classList.toggle("drive-sheet-open", open);
 }
 
 function eatSooner() {
@@ -1583,21 +1729,12 @@ function clearFieldTestData() {
 function renderDecisionCard(pick, trip, copy) {
   if (!pick) {
     els.decisionCard.innerHTML = `
-      <div class="decision-card-top">
-        <div class="badge ${trip.badgeClass}">${trip.label}</div>
-        <div class="confidence-chip confidence-medium">Watching ahead</div>
-      </div>
-      <div class="empty driver-empty">
-        <div class="score-hero score-hero-empty">
-          <span>Detour Score</span>
-          <strong>—</strong>
-          <small>${state.skipIntent ? "No remaining open alternative" : "Waiting for a qualifying stop"}</small>
-        </div>
-        <h2>${escapeHtml(trip.headline)}</h2>
-        <p>${escapeHtml(trip.subline)}</p>
-        <div class="driver-callout">
-          <strong>${state.skipIntent ? "No alternative is currently available." : "No action needed."}</strong>
-          <span>${state.skipIntent ? "The current route results contain no remaining open stop after your skips." : "DetourEats will surface the next worthwhile decision."}</span>
+      <div class="compact-empty-state">
+        <div class="compact-empty-score"><span>Detour Score</span><strong>—</strong></div>
+        <div>
+          <span class="decision-eyebrow">Watching the route</span>
+          <h2>${escapeHtml(trip.headline)}</h2>
+          <p>${escapeHtml(trip.subline)}</p>
         </div>
       </div>
     `;
@@ -1605,101 +1742,75 @@ function renderDecisionCard(pick, trip, copy) {
   }
 
   const tier = getRecommendationTier(pick);
-  const primaryBadge = trip.key === "verify-hours" ? trip.label : tier;
   const openLabel = getHoursStatus(pick);
   const confidence = getConfidenceStatus(pick);
-  const provenance = getProvenanceStatus(pick);
-  const detourTier = getDetourTierStatus(pick);
-  const timing = getDecisionTiming(pick);
-  const comparison = getScoreComparison(pick, state.currentResult);
-  const explanation = pick.scoreExplanation || {};
   const locationLabel = getPlaceLocationLabel(pick);
   const foodFocus = getFoodFocus(pick);
-  const scoreClass =
-    pick.score >= 92 ? "score-elite" :
-    pick.score >= 84 ? "score-strong" :
-    "score-practical";
+  const explanation = pick.scoreExplanation || {};
+  const reviewSource = (pick.reviewEvidence?.sources || []).find(source => source.provider === "google")
+    || (pick.reviewEvidence?.sources || [])[0];
+  const rating = Number(reviewSource?.rating ?? pick.googleDiscoveryRating);
+  const ratingCount = Number(reviewSource?.reviewCount ?? pick.googleDiscoveryReviewCount ?? 0);
+  const ratingLine = Number.isFinite(rating) && rating > 0
+    ? `${reviewSource?.provider ? titleCase(reviewSource.provider) : "Google"} ${rating.toFixed(1)} · ${ratingCount.toLocaleString()} rating${ratingCount === 1 ? "" : "s"}`
+    : pick.reviewEvidence?.status === "ready"
+      ? "Review evidence connected"
+      : "Food evidence still limited";
+  const outlook = state.currentResult?.routeOutlook || {};
+  const next = normalizePick(state.currentResult?.nextAlternative);
+  const nextLine = next
+    ? `${next.name} is ${formatDuration(Math.max(0, getCandidateMinutes(next) - getCandidateMinutes(pick)))} later with a Detour Score of ${next.score}.`
+    : "No comparable open alternative is currently visible ahead.";
+  const primaryBadge = state.reviewRefining
+    ? "Checking evidence"
+    : trip.key === "verify-hours"
+      ? trip.label
+      : tier;
 
   els.decisionCard.innerHTML = `
-    <div class="decision-card-top">
-      <div class="badge ${trip.badgeClass}">${escapeHtml(primaryBadge)}</div>
-      <div class="card-status-chips">
-        <div class="provenance-chip ${provenance.className}">${escapeHtml(provenance.label)}</div>
-        <div class="detour-tier-chip ${detourTier.className}">${escapeHtml(detourTier.label)}</div>
-        <div class="confidence-chip ${confidence.className}">${escapeHtml(confidence.label)}</div>
-      </div>
+    <div class="compact-decision-top">
+      <span class="badge ${trip.badgeClass}">${escapeHtml(primaryBadge)}</span>
+      <span class="compact-confidence ${confidence.className}">${escapeHtml(confidence.label)}</span>
     </div>
 
-    <div class="score-and-decision">
-      <div class="score-hero ${scoreClass}" aria-label="Detour Score ${pick.score}">
-        <span>Detour Score</span>
+    <div class="compact-decision-main">
+      <div class="compact-score" aria-label="Detour Score ${pick.score}">
+        <span>Detour</span>
         <strong>${pick.score}</strong>
         <small>${escapeHtml(getScoreMeaning(pick.score))}</small>
       </div>
-
-      <div class="decision-copy">
-        <p class="driver-decision-label">${escapeHtml(trip.headline)}</p>
-        <h2 class="place-name">${escapeHtml(pick.name)}</h2>
-        <p class="place-location">${escapeHtml(locationLabel)}</p>
-        <div class="food-focus-line">
-          <span>${escapeHtml(foodFocus.label)}</span>
-          <strong>${escapeHtml(foodFocus.text)}</strong>
-        </div>
-        <p class="meta">${escapeHtml(trip.subline)}</p>
-        <div class="score-comparison ${comparison.className}">
-          ${escapeHtml(comparison.text)}
-        </div>
-        ${state.currentResult?.preferenceOutcome ? `
-          <div class="preference-outcome ${state.currentResult.preferenceOutcome.matched ? "matched" : "fallback"}">
-            <strong>${escapeHtml(state.currentResult.preferenceOutcome.label)}</strong>
-            <span>${escapeHtml(state.currentResult.preferenceOutcome.message)}</span>
-          </div>
-        ` : ""}
+      <div class="compact-place-copy">
+        <span class="decision-eyebrow">${escapeHtml(trip.headline)}</span>
+        <h2>${escapeHtml(pick.name)}</h2>
+        <p class="compact-location">${escapeHtml(locationLabel)}</p>
+        <p class="compact-food-focus"><strong>${escapeHtml(foodFocus.label)}:</strong> ${escapeHtml(foodFocus.text)}</p>
+        <p class="compact-rating-line">${escapeHtml(ratingLine)}</p>
       </div>
     </div>
 
-    ${renderRestaurantIntelligenceSummary(pick)}
-    ${renderReviewEvidenceSummary(pick)}
-
-    <div class="score-driver-row">
-      <div>
-        <span>${pick.reviewEvidence?.status === "ready" ? "Food" : "Food estimate"}</span>
-        <strong>${escapeHtml(String(explanation.restaurantQuality ?? "—"))}</strong>
-      </div>
-      <div>
-        <span>Trip fit</span>
-        <strong>${escapeHtml(String(explanation.tripFit ?? "—"))}</strong>
-      </div>
-      <div>
-        <span>Time fit</span>
-        <strong>${escapeHtml(String(explanation.timeFit ?? "—"))}</strong>
-      </div>
+    <div class="compact-metrics">
+      <div><span>Added drive</span><strong>${pick.added} min</strong></div>
+      <div><span>Arrival</span><strong>${escapeHtml(String(pick.arrival || "—"))}</strong></div>
+      <div><span>Status</span><strong>${escapeHtml(openLabel)}</strong></div>
+      <div><span>Food</span><strong>${escapeHtml(String(explanation.restaurantQuality ?? "—"))}</strong></div>
     </div>
 
-    <div class="decision-timing-callout">
-      <span>Decision window</span>
-      <strong>${escapeHtml(timing.label)}</strong>
-      <small>${escapeHtml(timing.detail)}</small>
-    </div>
+    <p class="compact-decision-reason">${escapeHtml(trip.subline)}</p>
 
-    <div class="fact-grid driver-fact-grid">
-      <div class="fact highlight">
-        <strong>Adds ${pick.added} min</strong>
-        <span>${pick.liveRoute ? "Added driving time versus staying on route" : "Estimated added driving time"} · food, parking, and wait time not included</span>
+    ${state.currentResult?.preferenceOutcome ? `
+      <div class="compact-preference-outcome ${state.currentResult.preferenceOutcome.matched ? "matched" : "fallback"}">
+        <strong>${escapeHtml(state.currentResult.preferenceOutcome.label)}</strong>
+        <span>${escapeHtml(state.currentResult.preferenceOutcome.message)}</span>
       </div>
-      <div class="fact">
-        <strong>${escapeHtml(openLabel)}</strong>
-        <span>${pick.liveRoute ? "Live ETA" : "Estimated arrival"} ${escapeHtml(String(pick.arrival))}</span>
-      </div>
-      <div class="fact">
-        <strong>${escapeHtml(foodFocus.text)}</strong>
-        <span>${escapeHtml(foodFocus.label)}</span>
-      </div>
-    </div>
+    ` : ""}
 
-    ${renderTrustSnapshot(pick)}
+    <div class="compact-next-option">
+      <span>${escapeHtml(outlook.label || "Road ahead")}</span>
+      <p>${escapeHtml(nextLine)}</p>
+    </div>
   `;
 }
+
 
 function renderDecisionConsequences(pick, result, trip) {
   const panel = els.decisionConsequencePanel;
@@ -1763,30 +1874,24 @@ function renderTripTimeline(pick, result) {
   const candidates = (result?.evaluated || result?.upcoming || [])
     .map(normalizePick)
     .filter(candidate => candidate && candidate.open !== false)
-    .sort((a, b) => {
-      if (state.routingMode === "live") {
-        return Number(a.minutesAhead ?? 999) - Number(b.minutesAhead ?? 999);
-      }
-      return Number(a.seq ?? 999) - Number(b.seq ?? 999);
-    })
-    .slice(0, 6);
+    .sort((a, b) => getCandidateMinutes(a) - getCandidateMinutes(b))
+    .slice(0, 4);
 
   if (state.routingMode === "live") {
-    const discovered = Number(state.liveMetrics?.discoveredCount || 0);
-    const curated = Number(state.liveMetrics?.curatedCount || 0);
-    els.timelineModeLabel.textContent =
-      discovered > 0
-        ? `${discovered} discovered · ${curated} curated`
-        : "Live location";
+    const googleCount = Number(state.liveMetrics?.googleDiscoveredCount || 0);
+    const qualified = Number(state.liveMetrics?.totalCandidates || candidates.length);
+    els.timelineModeLabel.textContent = googleCount > 0
+      ? `${qualified} qualified · Google enhanced`
+      : `${qualified} qualified`;
   } else {
-    els.timelineModeLabel.textContent = "Curated route";
+    els.timelineModeLabel.textContent = "Route options";
   }
 
   if (!candidates.length) {
     els.foodZoneSummary.innerHTML =
-      `<strong>Weak stretch ahead</strong><span>No qualifying stop in the current window.</span>`;
+      `<strong>Nothing dependable ahead yet</strong><span>DetourEats will keep checking the route.</span>`;
     els.tripTimeline.innerHTML =
-      `<p class="timeline-empty">DetourEats is watching beyond the current route window.</p>`;
+      `<p class="timeline-empty">No open, forward option currently clears the route and evidence checks.</p>`;
     return;
   }
 
@@ -1797,66 +1902,42 @@ function renderTripTimeline(pick, result) {
   `;
 
   els.tripTimeline.innerHTML = candidates.map((candidate, index) => {
-    const role = getTimelineRole(candidate, pick, index);
-    const timing = state.routingMode === "live"
-      ? `${formatDuration(candidate.minutesAhead)} ahead`
-      : `${formatDuration(estimateMinutesAhead(candidate))} ahead`;
-    const gap = index === 0
-      ? ""
-      : getTimelineGap(candidates[index - 1], candidate);
-    const zoneClass = candidate.score >= 92
-      ? "strong-zone"
-      : candidate.score >= 84
-        ? "good-zone"
-        : "backup-zone";
+    const selected = pick?.id === candidate.id;
+    const food = getFoodFocus(candidate);
+    const evidence = candidate.reviewEvidence?.sources?.[0];
+    const rating = Number(evidence?.rating ?? candidate.googleDiscoveryRating);
+    const ratingCount = Number(evidence?.reviewCount ?? candidate.googleDiscoveryReviewCount ?? 0);
+    const ratingText = Number.isFinite(rating) && rating > 0
+      ? `${rating.toFixed(1)} ★ · ${ratingCount.toLocaleString()}`
+      : candidate.reviewEvidence?.status === "ready"
+        ? "Evidence connected"
+        : "Estimate";
 
     return `
       <article
-        class="timeline-stop ${zoneClass} ${pick?.id === candidate.id ? "current" : ""}"
+        class="road-ahead-card ${selected ? "current" : ""}"
         data-road-ahead-id="${escapeHtml(candidate.id)}"
         role="button"
         tabindex="0"
         aria-label="Choose ${escapeHtml(candidate.name)} as your stop"
       >
-        <div class="timeline-line">
-          <span class="timeline-dot"></span>
+        <div class="road-card-top">
+          <span>${selected ? "Selected" : index === 0 ? "Next option" : `${formatDuration(getCandidateMinutes(candidate))} ahead`}</span>
+          <strong>${candidate.score}</strong>
         </div>
-        <div class="timeline-stop-body">
-          <div class="timeline-stop-top">
-            <span>${escapeHtml(role)}</span>
-            <div class="timeline-score"><small>Score</small><strong>${candidate.score}</strong></div>
-          </div>
-          <h3>${escapeHtml(candidate.name)}</h3>
-          <p class="timeline-location">${escapeHtml(getPlaceLocationLabel(candidate))}</p>
-          <p class="timeline-food-focus"><strong>${escapeHtml(getFoodFocus(candidate).label)}:</strong> ${escapeHtml(getFoodFocus(candidate).text)}</p>
-          <div class="timeline-provenance ${candidate.provenance === "route-discovered" ? "provenance-discovered" : "provenance-curated"}">
-            ${candidate.provenance === "route-discovered" ? "Route-discovered option" : "Curated recommendation"}
-          </div>
-          ${candidate.provenance === "route-discovered" ? `
-            <div class="timeline-detour-tier ${getDetourTierStatus(candidate).className}">
-              ${escapeHtml(getDetourTierStatus(candidate).label)}
-              ${Number(candidate.routeOffsetMiles || 0) > 0
-                ? ` · ${Number(candidate.routeOffsetMiles).toFixed(1)} mi from route`
-                : ""}
-            </div>
-          ` : ""}
-          ${candidate.intelligence ? `
-            <div class="timeline-intelligence ${escapeHtml(candidate.intelligence.level.className)}">
-              ${escapeHtml(candidate.intelligence.level.shortLabel)}
-              · ${escapeHtml(candidate.intelligence.confidenceLabel)} confidence
-            </div>
-          ` : ""}
-          <div class="timeline-meta">
-            <span>${escapeHtml(timing)}</span>
-            <span>Adds ${candidate.added} min</span>
-            <span class="timeline-choose">${pick?.id === candidate.id ? "Selected" : "Choose stop"}</span>
-          </div>
-          ${gap ? `<small>${escapeHtml(gap)}</small>` : ""}
+        <h3>${escapeHtml(candidate.name)}</h3>
+        <p class="road-card-location">${escapeHtml(getPlaceLocationLabel(candidate))}</p>
+        <p class="road-card-food"><strong>${escapeHtml(food.label)}:</strong> ${escapeHtml(food.text)}</p>
+        <div class="road-card-meta">
+          <span>Adds ${candidate.added} min</span>
+          <span>${escapeHtml(ratingText)}</span>
         </div>
+        <span class="road-card-action">${selected ? "Current recommendation" : "Choose this stop"}</span>
       </article>
     `;
   }).join("");
 }
+
 
 function analyzeTimelineZones(candidates) {
   const strong = candidates.filter(candidate => candidate.score >= 88);
@@ -1943,7 +2024,11 @@ function renderDetailsPanel(pick, trip, copy) {
   const rationale = copy.rationale || [];
   if (!pick) {
     els.detailsPanel.innerHTML = `
-      <h2>What DetourEats is doing</h2>
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="drive-sheet-heading">
+        <div><span>Recommendation details</span><strong>What DetourEats is doing</strong></div>
+        <button class="skip-close" type="button" data-close-details aria-label="Close details">×</button>
+      </div>
       <ul class="details-list">
         ${rationale.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
       </ul>
@@ -1973,7 +2058,11 @@ function renderDetailsPanel(pick, trip, copy) {
     : "";
 
   els.detailsPanel.innerHTML = `
-    <h2>Why this stop</h2>
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="drive-sheet-heading">
+      <div><span>Recommendation details</span><strong>Why ${escapeHtml(pick.name)}</strong></div>
+      <button class="skip-close" type="button" data-close-details aria-label="Close details">×</button>
+    </div>
     <p class="lead-copy">${escapeHtml(copy.lead)}</p>
     ${scoreBreakdown}
     <ul class="details-list">
@@ -2830,6 +2919,9 @@ async function startTrip() {
   state.selectedCandidateId = "";
   state.lastSkipAdjustment = "";
   state.detailsOpen = false;
+  state.tripToolsOpen = false;
+  state.reviewRefining = false;
+  state.reviewRefinementKey = "";
   state.currentTime = getActualCurrentMinutes();
   state.routePosition = 0;
   state.lookahead = 99;
@@ -2848,6 +2940,7 @@ async function startTrip() {
 
   els.setupScreen.classList.add("hidden");
   els.driveScreen.classList.remove("hidden");
+  document.body.classList.add("drive-mode");
   requestDriveWakeLock().catch(() => {});
 
   if (state.locationIsOrigin) {
@@ -2889,6 +2982,8 @@ async function activateLiveRoute() {
 
 function applyLiveSnapshot(snapshot) {
   state.liveCandidates = snapshot?.candidates || [];
+  state.reviewRefinementKey = "";
+  state.reviewRefining = false;
   state.liveMetrics = snapshot?.metrics || null;
   state.routingMode = "live";
   state.routingMessage = "";
@@ -2931,8 +3026,15 @@ function goBack() {
   state.liveSession = null;
   state.liveMetrics = null;
   state.detailsOpen = false;
+  state.tripToolsOpen = false;
+  state.reviewRefining = false;
+  if (state.reviewRefinementTimer) {
+    clearTimeout(state.reviewRefinementTimer);
+    state.reviewRefinementTimer = null;
+  }
   els.driveScreen.classList.add("hidden");
   els.setupScreen.classList.remove("hidden");
+  document.body.classList.remove("drive-mode", "drive-sheet-open");
 }
 
 function skipPick() {
@@ -2984,13 +3086,11 @@ function selectRoadAheadStop(candidateId) {
   state.selectedCandidateId = id;
   state.skipIntent = null;
   state.detailsOpen = false;
+  state.tripToolsOpen = false;
   closeSkipPanel();
+  closeDriveSheets();
   render();
   showToast("Stop selected", `${chosen.name} is now your active choice.`);
-
-  requestAnimationFrame(() => {
-    els.decisionCard?.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
 }
 
 function applySkipReason(reason) {
@@ -4036,6 +4136,12 @@ function updateFromControls() {
   render();
 }
 
+function titleCase(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -4328,7 +4434,7 @@ async function showSystemNotification(title, options = {}) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=1.9.6", {
+      .register("service-worker.js?v=2.0.0", {
         updateViaCache: "none"
       })
       .then(registration => {
@@ -4477,6 +4583,10 @@ els.tripTimeline?.addEventListener("keydown", event => {
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && !els.skipReasonPanel?.classList.contains("hidden")) {
     closeSkipPanel();
+    return;
+  }
+  if (event.key === "Escape" && (state.detailsOpen || state.tripToolsOpen)) {
+    closeDriveSheets();
   }
 });
 document.querySelectorAll("[data-skip-reason]").forEach(button => {
@@ -4524,7 +4634,16 @@ els.navigationModal.addEventListener("click", event => {
   if (event.target === els.navigationModal) closeNavigationModal();
 });
 els.whyButton.addEventListener("click", toggleWhyDetails);
-els.fasterButton.addEventListener("click", eatSooner);
+els.moreActionsButton?.addEventListener("click", toggleTripTools);
+els.closeTripToolsButton?.addEventListener("click", closeDriveSheets);
+els.driveSheetBackdrop?.addEventListener("click", closeDriveSheets);
+els.detailsPanel?.addEventListener("click", event => {
+  if (event.target.closest("[data-close-details]")) closeDriveSheets();
+});
+els.fasterButton.addEventListener("click", () => {
+  closeDriveSheets();
+  eatSooner();
+});
 els.recheckRouteButton.addEventListener("click", recheckRouteNow);
 (els.priorityChips || []).forEach(button => {
   button.addEventListener("click", () => setEatingPriority(button.dataset.priority));

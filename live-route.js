@@ -82,6 +82,9 @@
   const MAX_DISCOVERED_CANDIDATES = 36;
   const MAX_TABLE_CANDIDATES = 20;
   const MAX_EXACT_CANDIDATES = 10;
+  const GOOGLE_ROUTE_SAMPLE_LIMIT = 4;
+  const GOOGLE_ROUTE_RADIUS_METERS = 6500;
+  const GOOGLE_ROUTE_TIMEOUT_MS = 9000;
 
   const activeControllers = new Set();
   let activeBuildGeneration = 0;
@@ -597,6 +600,27 @@
       "Searching route sections for restaurants"
     );
 
+    const googleDiscoveryPromise =
+      discoverGoogleRouteRestaurants(
+        routeContext,
+        progressCallback,
+        {
+          tripMode,
+          buildGeneration
+        }
+      ).catch(error => {
+        console.warn(
+          "Google route discovery unavailable; retaining public route search:",
+          error
+        );
+        return {
+          candidates: [],
+          status: "unavailable",
+          attemptedSearches: 0,
+          successfulSearches: 0
+        };
+      });
+
     let discovery = {
       candidates: [],
       plan:
@@ -671,6 +695,11 @@
 
     assertBuildActive(buildGeneration);
 
+    const googleDiscovery =
+      await googleDiscoveryPromise;
+
+    assertBuildActive(buildGeneration);
+
     const relevantCurated =
       await prepareCuratedCandidates(
         candidates,
@@ -683,7 +712,10 @@
         filterOperationalCandidates(
           mergeCandidates(
             relevantCurated,
-            discovery.candidates
+            [
+              ...(discovery.candidates || []),
+              ...(googleDiscovery.candidates || [])
+            ]
           )
         )
       );
@@ -715,9 +747,19 @@
         baseline.routingProvider ||
         lastRoutingProviderLabel,
       discoveryStatus:
-        discovery.plan.status,
+        googleDiscovery.candidates.length > 0
+          ? "complete"
+          : discovery.plan.status,
       discoveryPlan:
-        discovery.plan,
+        googleDiscovery.candidates.length > 0
+          ? {
+              ...discovery.plan,
+              status: "complete",
+              providerLabel: "Google Places + OpenStreetMap",
+              label: "Google-enhanced route search",
+              summary: `${googleDiscovery.candidates.length} Google-rated restaurant${googleDiscovery.candidates.length === 1 ? "" : "s"} were merged with the public route search before detour screening.`
+            }
+          : discovery.plan,
       discoveryDiagnostics:
         discovery.diagnostics,
       statusExcludedCount:
@@ -728,7 +770,16 @@
       tripMode:
         String(tripMode || "balanced"),
       discoveredCount:
-        discovery.candidates.length,
+        discovery.candidates.length +
+        googleDiscovery.candidates.length,
+      googleDiscoveredCount:
+        googleDiscovery.candidates.length,
+      googleDiscoveryStatus:
+        googleDiscovery.status,
+      googleDiscoveryAttemptedSearches:
+        googleDiscovery.attemptedSearches,
+      googleDiscoverySuccessfulSearches:
+        googleDiscovery.successfulSearches,
       curatedCount:
         relevantCurated.length,
       lastDiscoveryAt: Date.now(),
@@ -1003,6 +1054,10 @@
 
         discoveredCount:
           routedDiscovered,
+        googleDiscoveredCount:
+          Number(session.googleDiscoveredCount || 0),
+        googleDiscoveryStatus:
+          session.googleDiscoveryStatus || "unknown",
         curatedCount:
           routedCurated,
         rawDiscoveredCount:
@@ -1042,11 +1097,13 @@
               ?.shortRoute
           ),
         discoveryProvider:
-          session.discoveryDiagnostics
-            ?.providerLabel ||
-          session.discoveryPlan
-            ?.providerLabel ||
-          "OpenStreetMap",
+          Number(session.googleDiscoveredCount || 0) > 0
+            ? "Google Places + OpenStreetMap"
+            : session.discoveryDiagnostics
+                ?.providerLabel ||
+              session.discoveryPlan
+                ?.providerLabel ||
+              "OpenStreetMap",
         shortRouteFallbackUsed:
           Boolean(
             session.discoveryDiagnostics
@@ -1846,6 +1903,594 @@
     );
 
     return results;
+  }
+
+  async function discoverGoogleRouteRestaurants(
+    routeContext,
+    progressCallback,
+    options = {}
+  ) {
+    const buildGeneration =
+      options.buildGeneration ??
+      activeBuildGeneration;
+
+    assertBuildActive(buildGeneration);
+
+    const samplePoints =
+      selectRouteSamplePoints(
+        routeContext,
+        GOOGLE_ROUTE_SAMPLE_LIMIT
+      );
+
+    if (!samplePoints.length) {
+      return {
+        candidates: [],
+        status: "empty",
+        attemptedSearches: 0,
+        successfulSearches: 0
+      };
+    }
+
+    progressCallback?.(
+      "Checking Google-rated restaurants along the route"
+    );
+
+    const controller =
+      new AbortController();
+    activeControllers.add(controller);
+    const timer = setTimeout(
+      () => controller.abort(),
+      GOOGLE_ROUTE_TIMEOUT_MS
+    );
+
+    try {
+      const response = await fetch(
+        "/api/route-places",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+          body: JSON.stringify({
+            samplePoints,
+            radiusMeters:
+              GOOGLE_ROUTE_RADIUS_METERS,
+            maxResultCount: 8,
+            tripMode:
+              normalizeTripMode(
+                options.tripMode
+              )
+          }),
+          signal: controller.signal
+        }
+      );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data?.message ||
+          `Google route discovery returned HTTP ${response.status}.`
+        );
+      }
+
+      assertBuildActive(buildGeneration);
+
+      const candidates =
+        dedupeCandidates(
+          (data.places || [])
+            .map(place =>
+              convertGoogleRouteCandidate(
+                place,
+                routeContext
+              )
+            )
+            .filter(Boolean)
+        )
+          .sort(
+            (a, b) =>
+              Number(b.discoveryRank || 0) -
+              Number(a.discoveryRank || 0)
+          )
+          .slice(0, 24);
+
+      return {
+        candidates,
+        status:
+          data.status ||
+          (candidates.length
+            ? "ok"
+            : "empty"),
+        attemptedSearches:
+          Number(
+            data.attemptedSearches ||
+            samplePoints.length
+          ),
+        successfulSearches:
+          Number(
+            data.successfulSearches ||
+            0
+          )
+      };
+    } finally {
+      clearTimeout(timer);
+      activeControllers.delete(
+        controller
+      );
+    }
+  }
+
+  function convertGoogleRouteCandidate(
+    place,
+    routeContext
+  ) {
+    const coordinates =
+      Array.isArray(place?.coordinates)
+        ? place.coordinates
+            .slice(0, 2)
+            .map(Number)
+        : null;
+
+    if (
+      !coordinates ||
+      !coordinates.every(
+        Number.isFinite
+      ) ||
+      !String(place?.name || "").trim()
+    ) {
+      return null;
+    }
+
+    const routeProjection =
+      projectPointToRoute(
+        coordinates,
+        routeContext
+      );
+    if (!routeProjection) return null;
+
+    const routeOffsetMiles =
+      metersToMiles(
+        routeProjection.distanceMeters
+      );
+    const detourTier =
+      getDetourTier(
+        routeProjection.distanceMeters
+      );
+    const rating =
+      Number(place.rating);
+    const reviewCount =
+      Math.max(
+        0,
+        Number(place.reviewCount || 0)
+      );
+    const hasRating =
+      Number.isFinite(rating) &&
+      rating > 0 &&
+      reviewCount > 0;
+    const adjustedRating =
+      hasRating
+        ? (
+            rating * reviewCount +
+            4.12 * 45
+          ) /
+          (reviewCount + 45)
+        : 3.85;
+    const foodReputation = clamp(
+      (
+        adjustedRating - 1
+      ) / 4 * 100,
+      52,
+      94
+    );
+    const reviewConfidence = clamp(
+      44 +
+      Math.log10(
+        Math.max(1, reviewCount)
+      ) * 15,
+      44,
+      94
+    );
+    const category =
+      humanizeGooglePlaceType(
+        place.primaryType ||
+        place.types?.[0] ||
+        "restaurant"
+      );
+    const chain =
+      detectChain(
+        place.name,
+        {}
+      );
+    const destinationEvidenceScore =
+      Math.round(
+        Math.min(
+          12,
+          2 +
+          Math.log10(
+            Math.max(1, reviewCount)
+          ) * 2.5 +
+          (rating >= 4.6 ? 2 : 0) +
+          (reviewCount >= 500 ? 2 : 0)
+        )
+      );
+    const destinationEvidenceLevel =
+      destinationEvidenceScore >= 8
+        ? "strong"
+        : destinationEvidenceScore >= 4
+          ? "moderate"
+          : "basic";
+    const destinationWorthiness = clamp(
+      foodReputation * 0.68 +
+      reviewConfidence * 0.20 +
+      Math.min(
+        12,
+        destinationEvidenceScore
+      ),
+      52,
+      95
+    );
+    const uniqueness = clamp(
+      58 +
+      (chain ? -18 : 5) +
+      (destinationEvidenceLevel ===
+        "strong"
+        ? 7
+        : 0),
+      34,
+      84
+    );
+    const businessStatus =
+      String(
+        place.businessStatus ||
+        ""
+      );
+    const closed =
+      businessStatus ===
+      "CLOSED_PERMANENTLY";
+    const publishedHours =
+      Array.isArray(
+        place.weekdayDescriptions
+      ) &&
+      place.weekdayDescriptions.length
+        ? place.weekdayDescriptions.join(
+            "; "
+          )
+        : "Hours available from Google";
+    const confidence =
+      reviewCount >= 100
+        ? "High"
+        : reviewCount >= 15
+          ? "Medium"
+          : "Low";
+
+    return {
+      id:
+        `google-${place.id}`,
+      googlePlaceId:
+        String(place.id),
+      name:
+        String(place.name).trim(),
+      city:
+        String(place.city || ""),
+      address:
+        String(
+          place.address ||
+          place.city ||
+          "Along route"
+        ),
+      coordinates,
+      coordinatePrecision:
+        "Google Places location",
+      category,
+      cuisine: category,
+      chain,
+      independent: !chain,
+      regionalSpecialty: false,
+      localFavorite:
+        !chain && reviewCount >= 100,
+      quickStop:
+        /cafe|coffee|bakery|fast/i.test(
+          `${place.primaryType || ""} ${(place.types || []).join(" ")}`
+        ),
+      sitDown:
+        !/bakery|coffee_shop|cafe/i.test(
+          String(place.primaryType || "")
+        ),
+      familyFriendly: true,
+      priceLevel:
+        googlePriceLevel(
+          place.priceLevel
+        ),
+      foodReputation:
+        Math.round(foodReputation),
+      consistency:
+        Math.round(
+          clamp(
+            68 +
+            Math.log10(
+              Math.max(1, reviewCount)
+            ) * 5,
+            62,
+            88
+          )
+        ),
+      reviewConfidence:
+        Math.round(reviewConfidence),
+      uniqueness:
+        Math.round(uniqueness),
+      destinationWorthiness:
+        Math.round(
+          destinationWorthiness
+        ),
+      googleDiscoveryRating:
+        hasRating ? rating : null,
+      googleDiscoveryReviewCount:
+        reviewCount,
+      famousFor:
+        category,
+      evidenceSummary:
+        hasRating
+          ? `Google ${rating.toFixed(1)} from ${reviewCount.toLocaleString()} rating${reviewCount === 1 ? "" : "s"}. Review text is checked before the final recommendation settles.`
+          : "Found through Google Places. Review text is checked before the final recommendation settles.",
+      openAtArrival:
+        closed ? false : null,
+      hoursConfidence:
+        closed
+          ? "provider_confirmed_closed"
+          : place.weekdayDescriptions?.length
+            ? "provider_hours_available"
+            : "unknown",
+      publishedHours,
+      googleHoursPeriods:
+        Array.isArray(place.periods)
+          ? place.periods
+          : [],
+      confidence,
+      discoveryConfidence:
+        reviewCount >= 100
+          ? "high"
+          : reviewCount >= 15
+            ? "medium"
+            : "low",
+      provenance:
+        "route-discovered",
+      discoverySource:
+        "google-places",
+      sourceType:
+        "Google Places route discovery",
+      sourceUrl:
+        String(place.url || ""),
+      verifiedDate:
+        "Checked on current route",
+      operationalStatus:
+        closed
+          ? "closed"
+          : businessStatus ===
+              "OPERATIONAL"
+            ? "operational-signals-present"
+            : "unverified",
+      operationalConfidence:
+        businessStatus
+          ? "high"
+          : "medium",
+      operationalReason:
+        closed
+          ? "Google reports this business permanently closed."
+          : businessStatus ===
+              "OPERATIONAL"
+            ? "Google currently reports this business operational."
+            : "Google returned a current business listing.",
+      operationalLastChecked:
+        new Date().toISOString(),
+      operationalAgeDays: 0,
+      operationalSignals:
+        businessStatus ? 3 : 2,
+      operationalRisk:
+        closed
+          ? "Google reports this business closed."
+          : "Google rating data is available. Arrival hours and food-specific review evidence are finalized separately.",
+      routeBucket:
+        routeProjection.bucket,
+      routeProgress:
+        routeProjection.progress,
+      routeAlongMiles:
+        metersToMiles(
+          routeProjection.alongMeters
+        ),
+      routeOffsetMiles,
+      detourTier,
+      searchTier:
+        detourTier,
+      exceptionalScan: false,
+      exceptionalOnly: false,
+      destinationEvidenceScore,
+      destinationEvidenceLevel,
+      discoveryRank:
+        foodReputation +
+        destinationWorthiness +
+        reviewConfidence * 0.6 +
+        destinationEvidenceScore * 5 -
+        routeOffsetMiles * 1.6 -
+        (chain ? 16 : 0)
+    };
+  }
+
+  function selectRouteSamplePoints(
+    routeContext,
+    maximum
+  ) {
+    const total =
+      Number(
+        routeContext?.totalMeters ||
+        0
+      );
+    if (total <= 0) return [];
+
+    const count =
+      total < 90000
+        ? 2
+        : total < 260000
+          ? 3
+          : Math.max(
+              3,
+              Math.min(
+                maximum,
+                GOOGLE_ROUTE_SAMPLE_LIMIT
+              )
+            );
+    const result = [];
+
+    for (
+      let index = 1;
+      index <= count;
+      index += 1
+    ) {
+      const progress =
+        index /
+        (count + 1);
+      const coordinate =
+        coordinateAtRouteProgress(
+          routeContext,
+          progress
+        );
+      if (coordinate) {
+        result.push(coordinate);
+      }
+    }
+
+    return dedupeCoordinatePairs(
+      result
+    );
+  }
+
+  function coordinateAtRouteProgress(
+    routeContext,
+    progress
+  ) {
+    const geometry =
+      routeContext?.geometry || [];
+    const cumulative =
+      routeContext?.cumulativeMeters || [];
+    const total =
+      Number(
+        routeContext?.totalMeters || 0
+      );
+    if (
+      geometry.length < 2 ||
+      total <= 0
+    ) {
+      return geometry[0] || null;
+    }
+
+    const target =
+      clamp(progress, 0, 1) *
+      total;
+    let index = 1;
+    while (
+      index < cumulative.length &&
+      cumulative[index] < target
+    ) {
+      index += 1;
+    }
+    if (index >= cumulative.length) {
+      return geometry[
+        geometry.length - 1
+      ];
+    }
+
+    const beforeDistance =
+      Number(cumulative[index - 1] || 0);
+    const afterDistance =
+      Number(cumulative[index] || total);
+    const ratio = clamp(
+      (
+        target - beforeDistance
+      ) /
+      Math.max(
+        1,
+        afterDistance - beforeDistance
+      ),
+      0,
+      1
+    );
+    const before =
+      geometry[index - 1];
+    const after =
+      geometry[index];
+
+    return [
+      Number(before[0]) +
+        (
+          Number(after[0]) -
+          Number(before[0])
+        ) * ratio,
+      Number(before[1]) +
+        (
+          Number(after[1]) -
+          Number(before[1])
+        ) * ratio
+    ];
+  }
+
+  function humanizeGooglePlaceType(
+    value
+  ) {
+    const labels = {
+      restaurant: "Restaurant",
+      cafe: "Café",
+      bakery: "Bakery",
+      coffee_shop: "Coffee shop",
+      american_restaurant:
+        "American",
+      barbecue_restaurant:
+        "Barbecue",
+      breakfast_restaurant:
+        "Breakfast",
+      brunch_restaurant:
+        "Brunch",
+      hamburger_restaurant:
+        "Burgers",
+      pizza_restaurant: "Pizza",
+      seafood_restaurant:
+        "Seafood",
+      italian_restaurant:
+        "Italian",
+      mexican_restaurant:
+        "Mexican",
+      chinese_restaurant:
+        "Chinese",
+      japanese_restaurant:
+        "Japanese",
+      thai_restaurant: "Thai",
+      indian_restaurant:
+        "Indian",
+      sandwich_shop:
+        "Sandwiches",
+      fast_food_restaurant:
+        "Fast food"
+    };
+    const key =
+      String(value || "")
+        .toLowerCase();
+    if (labels[key]) return labels[key];
+    return key
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, letter =>
+        letter.toUpperCase()
+      ) || "Restaurant";
+  }
+
+  function googlePriceLevel(value) {
+    const key =
+      String(value || "")
+        .toUpperCase();
+    if (key.includes("INEXPENSIVE")) return "$";
+    if (key.includes("MODERATE")) return "$$";
+    if (key.includes("VERY_EXPENSIVE")) return "$$$$";
+    if (key.includes("EXPENSIVE")) return "$$$";
+    return "$$";
   }
 
   async function discoverRestaurants(
@@ -4767,7 +5412,9 @@ out center tags meta;`;
       buildRouteChunks,
       projectPointToRoute,
       determineSearchOutcome,
-      applyRouteMatrix
+      applyRouteMatrix,
+      selectRouteSamplePoints,
+      convertGoogleRouteCandidate
     }
   };
 })();
