@@ -1,8 +1,8 @@
-/* DetourEats v2.0.0 review evidence client */
+/* DetourEats v2.0.2 review evidence client */
 (function () {
   "use strict";
 
-  const CACHE_KEY = "detoureats_review_evidence_v4";
+  const CACHE_KEY = "detoureats_review_evidence_v5";
   const TTL_MS = 7 * 24 * 60 * 60 * 1000;
   const MAX_REQUEST = 8;
   const inflight = new Set();

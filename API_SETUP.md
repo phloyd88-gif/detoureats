@@ -1,4 +1,4 @@
-# DetourEats API Setup — v2.0.0
+# DetourEats API Setup — v2.0.2
 
 ## Required: Google Places
 
@@ -19,11 +19,11 @@ Do not place the key in browser JavaScript, GitHub, screenshots, or chat message
 
 ### No additional Google setup for this release
 
-If review-backed Google results already worked in v1.9.7, the same key should work in v2.0.0. Redeploying the repository is sufficient.
+If review-backed Google results already worked in v1.9.7, the same key should work in v2.0.2. Redeploying the repository is sufficient.
 
 ### Usage monitoring
 
-Because v2.0.0 adds Google-powered route discovery, it can make more Places requests than earlier releases. During beta testing:
+Because v2.0.2 adds Google-powered route discovery, it can make more Places requests than earlier releases. During beta testing:
 
 - Enable a Google Cloud billing budget and alerts.
 - Review Places API usage after several test routes.
@@ -65,4 +65,4 @@ The Places key may be valid while a field, quota, billing, or restriction issue 
 
 ### Old interface remains visible
 
-Confirm the footer reads `DetourEats v2.0.0`, then use a private window or remove and reinstall the home-screen app.
+Confirm the footer reads `DetourEats v2.0.2`, then use a private window or remove and reinstall the home-screen app.

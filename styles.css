@@ -3142,7 +3142,7 @@ body.skip-panel-open {
   margin-top: 11px;
 }
 
-/* v2.0.0 clearer location, food focus, and route-impact language */
+/* v2.0.1 clearer location, food focus, and route-impact language */
 .place-location {
   margin: -2px 0 9px;
   color: #475569;
@@ -3198,7 +3198,7 @@ body.skip-panel-open {
   }
 }
 
-/* v2.0.0 installable app and mobile-readiness polish */
+/* v2.0.1 installable app and mobile-readiness polish */
 html {
   min-height: 100%;
   background: #052e16;
@@ -3527,7 +3527,7 @@ textarea {
 }
 
 
-/* v2.0.0 final DetourEats brand integration */
+/* v2.0.1 final DetourEats brand integration */
 @media (max-width: 390px) {
   .brand-bar { padding: 10px 12px 9px; border-radius: 21px; }
   .brand-logo { width: min(305px, 100%); }
@@ -3535,7 +3535,7 @@ textarea {
 }
 
 /* =========================================================
-   DetourEats v2.0.0 — compact driver interface
+   DetourEats v2.0.1 — compact driver interface
    ========================================================= */
 
 body.drive-mode {
@@ -4353,7 +4353,7 @@ body.drive-sheet-open {
   }
 }
 
-/* v2.0.0 compact optional drive setup */
+/* v2.0.1 compact optional drive setup */
 .drive-readiness-card {
   padding: 0;
   overflow: hidden;

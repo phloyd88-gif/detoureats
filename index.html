@@ -11,10 +11,10 @@
   <meta name="apple-mobile-web-app-title" content="DetourEats">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>DetourEats</title>
-  <link rel="manifest" href="manifest.webmanifest?v=2.0.0">
+  <link rel="manifest" href="manifest.webmanifest?v=2.0.2">
   <link rel="icon" href="icons/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="styles.css?v=2.0.0">
+  <link rel="stylesheet" href="styles.css?v=2.0.2">
 </head>
 <body>
   <div id="connectionBanner" class="connection-banner hidden" role="status" aria-live="polite">
@@ -179,8 +179,8 @@
               <label>
                 Chains
                 <select id="chainPolicyInput">
-                  <option value="avoid" selected>Avoid chains</option>
-                  <option value="fallback">Chains only as fallback</option>
+                  <option value="fallback" selected>Prefer independents</option>
+                  <option value="avoid">Never show chains</option>
                   <option value="allow">Allow all</option>
                 </select>
               </label>
@@ -282,7 +282,7 @@
 
       <div class="promise-strip">
         <div><strong>No scrolling</strong><span>We pick the stop.</span></div>
-        <div><strong>No chains first</strong><span>Local food leads.</span></div>
+        <div><strong>Independents first</strong><span>Chains appear only when they are the best available fallback.</span></div>
         <div><strong>No backtracking</strong><span>Added trip time matters.</span></div>
       </div>
     </section>
@@ -591,16 +591,16 @@
   </div>
 
   <div class="build-version" aria-label="Application version">
-    DetourEats v2.0.0
+    DetourEats v2.0.2
   </div>
 
-  <script src="data.js?v=2.0.0"></script>
-  <script src="engine.js?v=2.0.0"></script>
-  <script src="review-evidence.js?v=2.0.0"></script>
-  <script src="place-status.js?v=2.0.0"></script>
-  <script src="live-route.js?v=2.0.0"></script>
-  <script src="address-search.js?v=2.0.0"></script>
-  <script src="restaurant-intelligence.js?v=2.0.0"></script>
-  <script src="app.js?v=2.0.0"></script>
+  <script src="data.js?v=2.0.2"></script>
+  <script src="engine.js?v=2.0.2"></script>
+  <script src="review-evidence.js?v=2.0.2"></script>
+  <script src="place-status.js?v=2.0.2"></script>
+  <script src="live-route.js?v=2.0.2"></script>
+  <script src="address-search.js?v=2.0.2"></script>
+  <script src="restaurant-intelligence.js?v=2.0.2"></script>
+  <script src="app.js?v=2.0.2"></script>
 </body>
 </html>

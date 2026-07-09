@@ -82,9 +82,9 @@
   const MAX_DISCOVERED_CANDIDATES = 36;
   const MAX_TABLE_CANDIDATES = 20;
   const MAX_EXACT_CANDIDATES = 10;
-  const GOOGLE_ROUTE_SAMPLE_LIMIT = 4;
+  const GOOGLE_ROUTE_SAMPLE_LIMIT = 7;
   const GOOGLE_ROUTE_RADIUS_METERS = 6500;
-  const GOOGLE_ROUTE_TIMEOUT_MS = 9000;
+  const GOOGLE_ROUTE_TIMEOUT_MS = 12000;
 
   const activeControllers = new Set();
   let activeBuildGeneration = 0;
@@ -1919,7 +1919,8 @@
     const samplePoints =
       selectRouteSamplePoints(
         routeContext,
-        GOOGLE_ROUTE_SAMPLE_LIMIT
+        GOOGLE_ROUTE_SAMPLE_LIMIT,
+        options.tripMode
       );
 
     if (!samplePoints.length) {
@@ -1956,7 +1957,7 @@
             samplePoints,
             radiusMeters:
               GOOGLE_ROUTE_RADIUS_METERS,
-            maxResultCount: 8,
+            maxResultCount: 10,
             tripMode:
               normalizeTripMode(
                 options.tripMode
@@ -2319,50 +2320,41 @@
 
   function selectRouteSamplePoints(
     routeContext,
-    maximum
+    maximum,
+    tripMode = "balanced"
   ) {
-    const total =
-      Number(
-        routeContext?.totalMeters ||
-        0
-      );
+    const total = Number(routeContext?.totalMeters || 0);
     if (total <= 0) return [];
 
-    const count =
-      total < 90000
-        ? 2
-        : total < 260000
-          ? 3
-          : Math.max(
-              3,
-              Math.min(
-                maximum,
-                GOOGLE_ROUTE_SAMPLE_LIMIT
-              )
-            );
-    const result = [];
+    const limit = Math.max(
+      2,
+      Math.min(Number(maximum || GOOGLE_ROUTE_SAMPLE_LIMIT), GOOGLE_ROUTE_SAMPLE_LIMIT)
+    );
+    const mode = normalizeTripMode(tripMode);
+    let progressPoints;
 
-    for (
-      let index = 1;
-      index <= count;
-      index += 1
-    ) {
-      const progress =
-        index /
-        (count + 1);
-      const coordinate =
-        coordinateAtRouteProgress(
-          routeContext,
-          progress
-        );
-      if (coordinate) {
-        result.push(coordinate);
-      }
+    if (total < 90000) {
+      progressPoints = mode === "hungry"
+        ? [0.04, 0.16, 0.38, 0.68]
+        : [0.08, 0.30, 0.58, 0.82];
+    } else if (total < 260000) {
+      progressPoints = mode === "hungry"
+        ? [0.03, 0.09, 0.18, 0.34, 0.55, 0.78]
+        : [0.05, 0.16, 0.32, 0.50, 0.70, 0.88];
+    } else if (mode === "hungry") {
+      progressPoints = [0.025, 0.07, 0.14, 0.26, 0.43, 0.64, 0.84];
+    } else if (mode === "adventure") {
+      progressPoints = [0.06, 0.17, 0.31, 0.47, 0.63, 0.79, 0.93];
+    } else {
+      progressPoints = [0.035, 0.11, 0.23, 0.39, 0.57, 0.76, 0.91];
     }
 
-    return dedupeCoordinatePairs(
-      result
-    );
+    const result = progressPoints
+      .slice(0, limit)
+      .map(progress => coordinateAtRouteProgress(routeContext, progress))
+      .filter(Boolean);
+
+    return dedupeCoordinatePairs(result);
   }
 
   function coordinateAtRouteProgress(

@@ -1,4 +1,24 @@
-# DetourEats Changelog
+# Changelog
+
+## v2.0.2 — Eligibility Rescue and Denser Route Scan
+
+- Adds a final hard-eligibility safety net so **Keep driving** cannot appear while a forward, non-backtracking, non-closed restaurant remains.
+- Moves quick-stop, sit-down, cuisine, price, and related preferences fully into ranking instead of hard filtering.
+- Preserves hard exclusions for skipped places, behind-route candidates, backtracking, confirmed closure, closed-at-arrival status, and explicit **Never show chains**.
+- Adds eligibility diagnostics for usable, independent, closed, behind-route, backtracking, and chain-excluded candidates.
+- Increases Google route sampling from four points to as many as seven.
+- Front-loads route samples in **Eat soon** mode so nearby independent restaurants are checked earlier.
+- Increases Google route candidates per sample and extends the discovery timeout.
+- Resets browser and service-worker caches for the corrected eligibility logic.
+
+## v2.0.1 — Best-Available Results Guardrail
+
+- Prevents preference combinations from producing a false **Keep driving** screen when an open, forward, route-safe restaurant exists.
+- Adds a general best-available fallback that relaxes cuisine and stop-style preferences while preserving safety, direction, closure, skipped-place exclusions, and an explicit **Never show chains** setting.
+- Changes the default chain behavior to **Prefer independents**: independent restaurants lead, but a chain can appear rather than returning no result.
+- Migrates the previous hard `Avoid chains` default to the new independent-first behavior for existing browser users.
+- Reserves **Keep driving** for cases where no open, forward restaurant is actually available in the checked route window.
+- Replaces misleading `qualified` and `quality bar` language with `route-fit` and factual availability messages.
 
 ## v2.0.0 — Results and Driver Interface Rebuild
 

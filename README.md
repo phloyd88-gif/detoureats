@@ -1,31 +1,35 @@
-# DetourEats v2.0.0
+# DetourEats v2.0.2
 
-DetourEats recommends worthwhile food stops along a live driving route. Version 2.0.0 is a structural results-and-interface release: it improves which restaurants enter the candidate pool, waits for review evidence before enabling the primary decision, and replaces the long scrolling recommendation page with a compact driver-oriented layout.
+## v2.0.2 route-availability correction
 
-## What changed in v2.0.0
+Version 2.0.2 fixes the false **Keep driving** condition at the eligibility layer. DetourEats now has a second, independent safety-net pass that keeps the strongest usable restaurant visible whenever any forward, non-backtracking, non-closed option exists. Quick versus sit-down, cuisine, price, and similar choices affect ranking rather than deleting the candidate pool.
 
-### Stronger and more consistent results
+The route discovery scan is also denser and more front-loaded. Long routes now check up to seven Google route points, including several near the beginning of the trip, so **Eat soon** is less likely to miss nearby independent restaurants.
 
-- Google Places now supplements OpenStreetMap during restaurant discovery along the route. Previously, Google was used only after a map candidate had already been found.
-- Google and OpenStreetMap candidates are merged, deduplicated, screened against the route, and ranked together.
-- The app evaluates a diversified shortlist of up to eight candidates rather than researching only the first few provisional winners.
-- Google place IDs are carried directly into the evidence request, reducing false identity matches.
-- Review-backed Food scores are shrunk toward a neutral baseline when evidence is thin.
-- Food themes and concerns are described as repeated only when they appear more than once in the available review text.
-- Google operating hours can update open-at-arrival status when sufficient hours data is returned.
-- When at least two review-backed choices exist, an incomplete provisional map listing cannot win solely because it is convenient.
-- Review evidence requests run in parallel, reducing the chance that one slow restaurant blocks the entire result set.
+## What changed in v2.0.2
 
-### Cleaner driver interface
+### Availability and fallback integrity
 
-- The recommendation is condensed into one primary card with restaurant, city, food focus, score, rating, added driving time, and the main decision reason.
-- Primary actions remain fixed at the bottom of the screen: **Add Stop**, **Skip**, **Why**, and **More**.
-- **Why** opens the detailed evidence in a bottom sheet instead of extending the page.
-- **More** opens trip tools in a bottom sheet.
-- **Road Ahead** is a horizontal, swipeable list of selectable alternatives.
-- Drive Readiness is collapsed on the setup screen until needed.
-- The app does not automatically jump the page when a Road Ahead option is selected.
-- While the strongest candidates are still being checked, **Add Stop** is temporarily disabled and the app shows **Checking strongest options**.
+- Added an engine-level hard-eligibility diagnostic pass.
+- Added an app-level final safety net so a usable restaurant cannot disappear because of a scoring or preference mismatch.
+- Preserved hard exclusions only for skipped places, behind-route options, backtracking, confirmed closures, closed-at-arrival results, and an explicit **Never show chains** setting.
+- Removed quick-stop, sit-down, cuisine, and similar preference checks from the hard candidate filter.
+- Allows extended or exceptional route candidates to become the best-available fallback when no ordinary option survives.
+- Keeps independent restaurants first under **Prefer independents** without requiring a chain fallback.
+
+### Denser route discovery
+
+- Increased Google route sampling from four points to as many as seven.
+- Added early-route samples for **Eat soon** mode.
+- Increased the per-route Google candidate request limit while retaining OpenStreetMap fallback discovery.
+- Extended the route-discovery timeout to accommodate the denser scan.
+
+### Existing v2.0 interface retained
+
+- Compact driver card and fixed bottom controls.
+- Selectable horizontal Road Ahead carousel.
+- Review-backed Food scoring and Google Places identity matching.
+- Approved DetourEats branding and installable PWA behavior.
 
 ## Data flow
 
@@ -45,7 +49,7 @@ The existing Vercel environment variable is still used:
 GOOGLE_PLACES_API_KEY
 ```
 
-The key must allow **Places API (New)**. No new variable is required for v2.0.0.
+The key must allow **Places API (New)**. No new variable is required for v2.0.2.
 
 Optional integrations remain supported:
 

@@ -1,4 +1,4 @@
-/* DetourEats v2.0.0 Review-Backed Scoring Engine
+/* DetourEats v2.0.2 Review-Backed Scoring Engine
 
 Detour Score means:
 "How good of a food decision is this stop for this traveler on this trip right now?"
@@ -47,6 +47,18 @@ It is restaurant quality filtered through trip fit.
         .map(candidate => scoreCandidate(candidate, settings, normalized))
         .sort(compareScoredCandidates);
       usedSkipFallbackWindow = scored.length > 0;
+    }
+
+    // Availability fallback: user preferences should rank results, not erase
+    // every route-safe restaurant. If the normal window is empty, retain the
+    // best remaining open, forward option and explain that it is a fallback.
+    let usedAvailabilityFallback = false;
+    if (!scored.length && normalized.length) {
+      visible = filterCandidatesForAvailabilityFallback(normalized, settings);
+      scored = visible
+        .map(candidate => scoreCandidate(candidate, settings, normalized))
+        .sort(compareScoredCandidates);
+      usedAvailabilityFallback = scored.length > 0;
     }
 
     const minimumScore = number(settings.minimumScore, 0);
@@ -123,6 +135,7 @@ It is restaurant quality filtered through trip fit.
     return {
       pick,
       upcoming: rankedEligible.slice(0, 6),
+      eligibilityDiagnostics: buildEligibilityDiagnostics(normalized, settings),
       evaluated: scored,
       explanation: pick ? pick.scoreExplanation : null,
       reason: pick ? "recommended" : "no_candidate_available",
@@ -144,7 +157,13 @@ It is restaurant quality filtered through trip fit.
               label: "Best remaining fallback",
               message: "The normal preference window had no result, so DetourEats widened the search and kept the best safe option visible."
             }
-          : null))
+          : (usedAvailabilityFallback
+            ? {
+                matched: false,
+                label: "Best available fallback",
+                message: "No restaurant matched every active preference, so DetourEats kept the strongest open, forward option visible instead of returning no result."
+              }
+            : null)))
     };
   }
 
@@ -463,10 +482,7 @@ It is restaurant quality filtered through trip fit.
     const lookahead = number(settings.lookahead, 5);
     const maxSeq = lookahead >= 99 ? Infinity : routePosition + lookahead;
     const skippedIds = new Set((settings.skippedIds || []).map(String));
-    const excludedCategories = (settings.excludedCategories || []).map(value => String(value).toLowerCase());
-    const stopType = String(settings.stopType || "either").toLowerCase();
-    const pricePreference = String(settings.pricePreference || "any").toLowerCase();
-    const chainPolicy = String(settings.chainPolicy || "avoid").toLowerCase();
+    const chainPolicy = String(settings.chainPolicy || "fallback").toLowerCase();
 
     return candidates.filter(c => {
       if (c.exceptionalOnly) return false;
@@ -475,24 +491,15 @@ It is restaurant quality filtered through trip fit.
       if (c.seq > maxSeq) return false;
       if (chainPolicy === "avoid" && c.chain) return false;
       if (c.backtracking) return false;
+      if (isConfirmedBusinessClosed(c)) return false;
       if (c.openAtArrival === false) return false;
-      if (stopType === "quick" && !c.quickStop) return false;
-      if (stopType === "sitdown" && !c.sitDown) return false;
 
-      const category = String(c.category || "").toLowerCase();
-      if (excludedCategories.some(excluded => category.includes(excluded) || excluded.includes(category))) {
-        return false;
-      }
-
-      if (settings.candidatePool && settings.candidatePool !== "All") {
-        const haystack = [
-          c.category,
-          c.segment,
-          c.bucket,
-          ...(Array.isArray(c.tags) ? c.tags : [])
-        ].filter(Boolean).join(" ").toLowerCase();
-        if (!haystack.includes(String(settings.candidatePool).toLowerCase())) return false;
-      }
+      /*
+        Stop format, cuisine, price, and similar user choices are ranking
+        preferences. They must never erase an otherwise usable route option.
+        The scoring layer handles those preferences after hard route-safety and
+        operating-status checks pass.
+      */
       return true;
     });
   }
@@ -500,7 +507,7 @@ It is restaurant quality filtered through trip fit.
   function filterCandidatesForSkipFallback(candidates, settings) {
     const routePosition = number(settings.routePosition, 0);
     const skippedIds = new Set((settings.skippedIds || []).map(String));
-    const chainPolicy = String(settings.chainPolicy || "avoid").toLowerCase();
+    const chainPolicy = String(settings.chainPolicy || "fallback").toLowerCase();
 
     return candidates.filter(candidate => {
       if (candidate.exceptionalOnly) return false;
@@ -512,6 +519,80 @@ It is restaurant quality filtered through trip fit.
       if (chainPolicy === "avoid" && candidate.chain) return false;
       return true;
     });
+  }
+
+  function filterCandidatesForAvailabilityFallback(candidates, settings) {
+    const routePosition = number(settings.routePosition, 0);
+    const skippedIds = new Set((settings.skippedIds || []).map(String));
+    const chainPolicy = String(settings.chainPolicy || "fallback").toLowerCase();
+
+    return candidates.filter(candidate => {
+      if (skippedIds.has(String(candidate.id))) return false;
+      if (number(candidate.seq, routePosition) < routePosition) return false;
+      if (candidate.backtracking) return false;
+      if (isConfirmedBusinessClosed(candidate)) return false;
+      if (candidate.openAtArrival === false) return false;
+      if (chainPolicy === "avoid" && candidate.chain) return false;
+      return true;
+    });
+  }
+
+  function isConfirmedBusinessClosed(candidate) {
+    const status = String(candidate?.operationalStatus || "").toLowerCase();
+    const hoursConfidence = String(candidate?.hoursConfidence || "").toLowerCase();
+    return Boolean(
+      candidate?.reviewEvidence?.businessClosed === true ||
+      ["closed", "locally-suppressed"].includes(status) ||
+      ["provider_confirmed_closed", "permanently_closed"].includes(hoursConfidence)
+    );
+  }
+
+  function buildEligibilityDiagnostics(candidates, settings = {}) {
+    const routePosition = number(settings.routePosition, 0);
+    const skippedIds = new Set((settings.skippedIds || []).map(String));
+    const chainPolicy = String(settings.chainPolicy || "fallback").toLowerCase();
+    const diagnostics = {
+      total: candidates.length,
+      usable: 0,
+      independentUsable: 0,
+      skipped: 0,
+      behind: 0,
+      backtracking: 0,
+      closedBusiness: 0,
+      closedAtArrival: 0,
+      chainExcluded: 0
+    };
+
+    for (const candidate of candidates) {
+      if (skippedIds.has(String(candidate.id))) {
+        diagnostics.skipped += 1;
+        continue;
+      }
+      if (number(candidate.seq, routePosition) < routePosition) {
+        diagnostics.behind += 1;
+        continue;
+      }
+      if (candidate.backtracking) {
+        diagnostics.backtracking += 1;
+        continue;
+      }
+      if (isConfirmedBusinessClosed(candidate)) {
+        diagnostics.closedBusiness += 1;
+        continue;
+      }
+      if (candidate.openAtArrival === false) {
+        diagnostics.closedAtArrival += 1;
+        continue;
+      }
+      if (chainPolicy === "avoid" && candidate.chain) {
+        diagnostics.chainExcluded += 1;
+        continue;
+      }
+      diagnostics.usable += 1;
+      if (!candidate.chain) diagnostics.independentUsable += 1;
+    }
+
+    return diagnostics;
   }
 
   function findExceptionalOpportunity(
@@ -946,7 +1027,7 @@ It is restaurant quality filtered through trip fit.
   }
 
   function chooseByChainPolicy(scored, settings) {
-    const policy = String(settings.chainPolicy || "avoid").toLowerCase();
+    const policy = String(settings.chainPolicy || "fallback").toLowerCase();
     if (policy !== "fallback") return scored;
 
     const independent = scored.filter(candidate => !candidate.chain);
@@ -1486,8 +1567,8 @@ It is restaurant quality filtered through trip fit.
         state: "keep-driving",
         headline: "Keep driving.",
         detail: afterSkip
-          ? "No remaining open restaurant is available in the current route results."
-          : "Nothing ahead currently clears the quality bar."
+          ? "No remaining open, forward restaurant is available in the current route results."
+          : "No open, forward restaurant is currently available in the checked route window."
       };
     }
 

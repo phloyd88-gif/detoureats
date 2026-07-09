@@ -1,4 +1,4 @@
-/* DetourEats v2.0.0 Restaurant Identity and Food Focus
+/* DetourEats v2.0.2 Restaurant Identity and Food Focus
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -160,7 +160,7 @@ let state = {
   tripMode: "balanced",
   stopType: "either",
   foodPreference: "anything",
-  chainPolicy: "avoid",
+  chainPolicy: "fallback",
   pricePreference: "any",
   familyFriendly: false,
   exceptionalAlerts: true,
@@ -279,30 +279,38 @@ function getEngineResult() {
   // v0.1/v0.2 engine exposes a global recommend(candidates, settings) function.
   if (typeof window.recommend === "function") {
     const result = window.recommend(candidates, engineSettings);
-    return {
-      ...result,
-      pick: result.pick,
-      upcoming: result.upcoming || [],
-      evaluated: result.evaluated || [],
-      exceptionalOpportunity:
-        result.exceptionalOpportunity || null
-    };
+    return ensureAvailableEngineResult(
+      {
+        ...result,
+        pick: result.pick,
+        upcoming: result.upcoming || [],
+        evaluated: result.evaluated || [],
+        exceptionalOpportunity:
+          result.exceptionalOpportunity || null
+      },
+      candidates,
+      engineSettings
+    );
   }
 
-  if (window.DetourEngine && typeof window.DetourEngine.recommend === "function") {
-    return window.DetourEngine.recommend({
+  if (window.DetourEatsEngine && typeof window.DetourEatsEngine.recommend === "function") {
+    return ensureAvailableEngineResult(
+      window.DetourEatsEngine.recommend(candidates, engineSettings),
       candidates,
-      ...engineSettings,
-      skippedIds: state.skippedIds
-    });
+      engineSettings
+    );
   }
 
   if (typeof window.getRecommendation === "function") {
-    return window.getRecommendation({
+    return ensureAvailableEngineResult(
+      window.getRecommendation({
+        candidates,
+        ...engineSettings,
+        skippedIds: state.skippedIds
+      }),
       candidates,
-      ...engineSettings,
-      skippedIds: state.skippedIds
-    });
+      engineSettings
+    );
   }
 
   // Fallback scoring if engine.js API changes or is unavailable.
@@ -319,6 +327,85 @@ function getEngineResult() {
     pick: visible[0] || null,
     upcoming: visible.slice(0, 6),
     reason: visible[0] ? "recommended" : "no_candidates"
+  };
+}
+
+function ensureAvailableEngineResult(result, candidates, settings) {
+  if (result?.pick || !Array.isArray(candidates) || !candidates.length) {
+    return result;
+  }
+
+  const skippedIds = new Set((settings.skippedIds || []).map(String));
+  const routePosition = Number(settings.routePosition || 0);
+  const chainPolicy = String(settings.chainPolicy || "fallback").toLowerCase();
+
+  const usable = candidates.filter(candidate => {
+    const id = String(candidate?.id ?? candidate?.name ?? "");
+    const seq = Number(candidate?.seq ?? candidate?.sequence ?? candidate?.routeIndex ?? routePosition);
+    const operationalStatus = String(candidate?.operationalStatus || "").toLowerCase();
+    const hoursConfidence = String(candidate?.hoursConfidence || "").toLowerCase();
+    const permanentlyClosed = Boolean(
+      candidate?.reviewEvidence?.businessClosed === true ||
+      ["closed", "locally-suppressed"].includes(operationalStatus) ||
+      ["provider_confirmed_closed", "permanently_closed"].includes(hoursConfidence)
+    );
+
+    if (!id || skippedIds.has(id)) return false;
+    if (Number.isFinite(seq) && seq < routePosition) return false;
+    if (candidate?.backtracking) return false;
+    if (permanentlyClosed || candidate?.openAtArrival === false) return false;
+    if (chainPolicy === "avoid" && candidate?.chain) return false;
+    return true;
+  });
+
+  if (!usable.length) return result;
+
+  let scored = usable;
+  const engine = window.DetourEatsEngine;
+  if (
+    engine?.normalizeCandidate &&
+    engine?.scoreCandidate
+  ) {
+    const normalized = usable.map(candidate => engine.normalizeCandidate(candidate));
+    scored = normalized
+      .map(candidate => engine.scoreCandidate(candidate, settings, normalized))
+      .sort((a, b) => {
+        const scoreDifference = Number(b.detourScore || b.score || 0) - Number(a.detourScore || a.score || 0);
+        if (scoreDifference) return scoreDifference;
+        return Number(a.estimatedAddedMinutes || 999) - Number(b.estimatedAddedMinutes || 999);
+      });
+  } else {
+    scored = usable
+      .map(candidate => ({ ...candidate, score: fallbackScore(candidate), detourScore: fallbackScore(candidate) }))
+      .sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+  }
+
+  if (chainPolicy === "fallback") {
+    const independents = scored.filter(candidate => !candidate.chain);
+    if (independents.length) scored = independents;
+  }
+
+  const pick = scored[0] || null;
+  if (!pick) return result;
+
+  return {
+    ...result,
+    pick,
+    upcoming: scored.slice(0, 6),
+    evaluated: scored,
+    reason: "best_available_safety_net",
+    decision: {
+      state: pick.openAtArrival === null ? "verify-hours" : "best-available",
+      headline: pick.openAtArrival === null ? "Verify hours first." : "Best available stop.",
+      detail: pick.openAtArrival === null
+        ? "No option matched every preference, but this forward restaurant remains usable if its hours are confirmed."
+        : "No option matched every preference, so DetourEats kept the strongest usable restaurant visible."
+    },
+    preferenceOutcome: result?.preferenceOutcome || {
+      matched: false,
+      label: "Best available fallback",
+      message: "Preferences were relaxed only after route safety, forward direction, and operating status were checked."
+    }
   };
 }
 
@@ -503,9 +590,9 @@ function getRecommendationCopy(pick, tripState) {
     return {
       lead: "Keep driving.",
       rationale: [
-        "No stop in the current lookahead window clears the bar.",
+        "No open, forward restaurant is currently available in the checked route window.",
         "DetourEats is still watching the route.",
-        "When there’s a better food decision ahead, we’ll surface it."
+        "As soon as a route-safe option appears, it will be surfaced."
       ]
     };
   }
@@ -756,7 +843,7 @@ function renderDriverStatus(pick, result, trip) {
 
     els.nextFoodZoneText.textContent = nextStrong
       ? `${nextStrong.city || nextStrong.name} · ${formatDuration(nextStrong.minutesAhead)} ahead`
-      : "No strong stop on the current live route";
+      : "Best available stop is still being evaluated";
 
     els.decisionCountdownText.textContent = pick
       ? getDecisionTiming(pick).label
@@ -770,7 +857,7 @@ function renderDriverStatus(pick, result, trip) {
       outcome.label,
       `${Number(metrics.rawDiscoveredCount || 0)} mapped`,
       `${Number(metrics.matrixScreenedCount || 0)} screened`,
-      `${Number(metrics.totalCandidates || 0)} qualified`,
+      `${Number(metrics.totalCandidates || 0)} route-fit`,
       Number(metrics.exactRouteCount || 0) > 0
         ? `${metrics.exactRouteCount} exact`
         : "",
@@ -970,7 +1057,7 @@ function eatSooner() {
 
   updatePriorityChips();
   render();
-  showToast("Eat soon selected", "Now showing the earliest open stop that clears the quality bar.");
+  showToast("Eat soon selected", "Now showing the earliest open, route-fit stop.");
 }
 
 function setEatingPriority(priority) {
@@ -1881,8 +1968,8 @@ function renderTripTimeline(pick, result) {
     const googleCount = Number(state.liveMetrics?.googleDiscoveredCount || 0);
     const qualified = Number(state.liveMetrics?.totalCandidates || candidates.length);
     els.timelineModeLabel.textContent = googleCount > 0
-      ? `${qualified} qualified · Google enhanced`
-      : `${qualified} qualified`;
+      ? `${qualified} route-fit · Google enhanced`
+      : `${qualified} route-fit`;
   } else {
     els.timelineModeLabel.textContent = "Route options";
   }
@@ -1891,7 +1978,7 @@ function renderTripTimeline(pick, result) {
     els.foodZoneSummary.innerHTML =
       `<strong>Nothing dependable ahead yet</strong><span>DetourEats will keep checking the route.</span>`;
     els.tripTimeline.innerHTML =
-      `<p class="timeline-empty">No open, forward option currently clears the route and evidence checks.</p>`;
+      `<p class="timeline-empty">No open, forward restaurant is currently available in the checked route window.</p>`;
     return;
   }
 
@@ -1946,8 +2033,8 @@ function analyzeTimelineZones(candidates) {
 
   if (!strong.length) {
     return {
-      headline: "Limited options ahead",
-      detail: "Usable stops exist, but none currently clears the strong-stop threshold."
+      headline: "Best available options ahead",
+      detail: "These are the strongest route-safe choices currently available, even if none is a standout destination."
     };
   }
 
@@ -2166,8 +2253,8 @@ function formatPreferenceLabel(value) {
     anything: "Anything good",
     local: "Local favorite",
     regional: "Regional specialty",
-    avoid: "Avoid chains",
-    fallback: "Chains as fallback",
+    avoid: "Never show chains",
+    fallback: "Independents first",
     allow: "Allow chains",
     any: "Any price",
     budget: "Inexpensive"
@@ -2376,9 +2463,9 @@ function getSearchOutcomeCopy(
     },
     restaurants_found_but_none_qualified: {
       label:
-        "Restaurants found; none qualified",
+        "Restaurants found; no route-safe option",
       detail:
-        "Restaurant records were found and screened, but none met the active detour and route-fit limits.",
+        "Restaurant records were found, but none remained open, forward, and within the active detour limits.",
       className:
         "pipeline-empty"
     },
@@ -2400,9 +2487,9 @@ function getSearchOutcomeCopy(
     },
     no_qualifying_restaurants: {
       label:
-        "No qualifying restaurant yet",
+        "No route-safe restaurant yet",
       detail:
-        "The route is valid, but there is not currently a restaurant that clears the recommendation threshold.",
+        "The route is valid, but no open, forward restaurant is currently available within the checked detour window.",
       className:
         "pipeline-empty"
     }
@@ -2743,7 +2830,7 @@ async function previewSelectedRoute({ quiet = false } = {}) {
       showToast(
         "Driving route ready",
         count > 0
-          ? `${count} route-relevant food option${count === 1 ? "" : "s"} qualified.`
+          ? `${count} route-relevant food option${count === 1 ? "" : "s"} passed the route check.`
           : outcome.detail
       );
     }
@@ -2821,11 +2908,12 @@ function loadSeamlessSettings() {
 
 function savePreferences() {
   const preferences = {
+    schemaVersion: 2,
     maxAdded: Number(els.maxAddedInput?.value || state.maxAdded || 10),
     tripMode: els.tripModeInput?.value || state.tripMode || "balanced",
     stopType: els.stopTypeInput?.value || state.stopType || "either",
     foodPreference: els.foodPreferenceInput?.value || state.foodPreference || "anything",
-    chainPolicy: els.chainPolicyInput?.value || state.chainPolicy || "avoid",
+    chainPolicy: els.chainPolicyInput?.value || state.chainPolicy || "fallback",
     pricePreference: els.pricePreferenceInput?.value || state.pricePreference || "any",
     familyFriendly: Boolean(els.familyFriendlyInput?.checked),
     exceptionalAlerts:
@@ -2865,7 +2953,13 @@ function loadPreferences() {
     els.foodPreferenceInput.value = saved.foodPreference;
   }
   if (els.chainPolicyInput && saved.chainPolicy) {
-    els.chainPolicyInput.value = saved.chainPolicy;
+    // v2.0.0 stored the old hard "avoid" default for many users. Migrate it
+    // to the intended independent-first fallback behavior so routes do not
+    // incorrectly collapse to Keep Driving when only chains are available.
+    els.chainPolicyInput.value =
+      Number(saved.schemaVersion || 0) < 2 && saved.chainPolicy === "avoid"
+        ? "fallback"
+        : saved.chainPolicy;
   }
   if (els.pricePreferenceInput && saved.pricePreference) {
     els.pricePreferenceInput.value = saved.pricePreference;
@@ -2905,7 +2999,7 @@ async function startTrip() {
   state.tripMode = els.tripModeInput.value;
   state.stopType = els.stopTypeInput?.value || "either";
   state.foodPreference = els.foodPreferenceInput?.value || "anything";
-  state.chainPolicy = els.chainPolicyInput?.value || "avoid";
+  state.chainPolicy = els.chainPolicyInput?.value || "fallback";
   state.pricePreference = els.pricePreferenceInput?.value || "any";
   state.familyFriendly = Boolean(els.familyFriendlyInput?.checked);
   state.exceptionalAlerts =
@@ -4434,7 +4528,7 @@ async function showSystemNotification(title, options = {}) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=2.0.0", {
+      .register("service-worker.js?v=2.0.2", {
         updateViaCache: "none"
       })
       .then(registration => {
