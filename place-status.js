@@ -1,4 +1,4 @@
-/* DetourEats v2.0.3 review-backed status validation */
+/* DetourEats v2.0.4 review-backed status validation */
 (function () {
   "use strict";
 

@@ -4415,7 +4415,7 @@ body.drive-sheet-open {
 
 
 /* =========================================================
-   DetourEats v2.0.3 — chain integrity and mobile containment
+   DetourEats v2.0.4 — chain integrity and mobile containment
    ========================================================= */
 html,
 body {
@@ -4591,5 +4591,133 @@ textarea {
   .priority-chip {
     font-size: 10px;
     padding-inline: 4px;
+  }
+}
+
+/* =========================================================
+   DetourEats v2.0.4 — compact Road Ahead rows
+   ========================================================= */
+.trip-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  overflow: visible;
+  padding: 0;
+  scroll-snap-type: none;
+}
+
+.road-ahead-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top top"
+    "name action"
+    "location action"
+    "food action"
+    "meta action";
+  column-gap: 12px;
+  row-gap: 3px;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  padding: 11px 12px;
+  align-items: center;
+}
+
+.road-card-top {
+  grid-area: top;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.road-card-top strong {
+  margin-left: auto;
+  font-size: 21px;
+  line-height: 1;
+}
+
+.road-ahead-card h3 {
+  grid-area: name;
+  margin: 1px 0 0;
+  font-size: 17px;
+  line-height: 1.12;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.road-card-location {
+  grid-area: location;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.road-card-food {
+  grid-area: food;
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.road-card-meta {
+  grid-area: meta;
+  justify-content: flex-start;
+  gap: 12px;
+  margin-top: 3px;
+  font-size: 10px;
+}
+
+.road-card-action {
+  grid-area: action;
+  align-self: center;
+  width: 94px;
+  max-width: 94px;
+  padding: 9px 8px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.15;
+}
+
+@media (max-width: 600px) {
+  .trip-timeline-panel {
+    padding: 13px 12px;
+  }
+
+  .timeline-heading {
+    align-items: flex-start;
+  }
+
+  .food-zone-summary {
+    display: block;
+    margin-bottom: 10px;
+  }
+
+  .food-zone-summary strong,
+  .food-zone-summary span {
+    display: block;
+  }
+
+  .food-zone-summary span {
+    margin-top: 2px;
+  }
+
+  .road-ahead-card {
+    grid-template-columns: minmax(0, 1fr) 84px;
+    column-gap: 9px;
+    padding: 10px;
+  }
+
+  .road-ahead-card h3 {
+    font-size: 16px;
+  }
+
+  .road-card-action {
+    width: 84px;
+    max-width: 84px;
+    padding: 8px 6px;
   }
 }

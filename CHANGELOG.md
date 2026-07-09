@@ -1,6 +1,14 @@
 # Changelog
 
-## v2.0.3 — Chain Exclusion and Mobile Width Fix
+## v2.0.4 — Mobile Road Ahead Redesign
+
+- Replaced the narrow side-by-side Road Ahead cards with full-width compact rows.
+- Removed horizontal swiping from the Road Ahead section.
+- Restaurant names, cities, food focus, time, rating, and score now read normally instead of wrapping into vertical columns.
+- Kept each alternative directly selectable with a compact Choose stop button.
+- Reduced card height and spacing so several options remain visible without excessive scrolling.
+
+## v2.0.4 — Chain Exclusion and Mobile Width Fix
 
 - Adds Dave’s Hot Chicken and additional national/regional brands to chain detection.
 - Normalizes apostrophes, punctuation, and spacing before chain matching, so branded Google Places results cannot bypass **Never show chains** because of name formatting.
@@ -9,7 +17,7 @@
 - Constrains sticky actions, bottom sheets, long addresses, metrics, and headers to the device viewport.
 
 
-## v2.0.3 — Eligibility Rescue and Denser Route Scan
+## v2.0.4 — Eligibility Rescue and Denser Route Scan
 
 - Adds a final hard-eligibility safety net so **Keep driving** cannot appear while a forward, non-backtracking, non-closed restaurant remains.
 - Moves quick-stop, sit-down, cuisine, price, and related preferences fully into ranking instead of hard filtering.

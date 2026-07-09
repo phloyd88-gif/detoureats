@@ -1,4 +1,4 @@
-/* DetourEats v2.0.3 Restaurant Identity and Food Focus
+/* DetourEats v2.0.4 Restaurant Identity and Food Focus
    Focus: clearer trip states, stronger recommendation language, cleaner demo behavior.
 */
 
@@ -4528,7 +4528,7 @@ async function showSystemNotification(title, options = {}) {
 function registerServiceWorker() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
-      .register("service-worker.js?v=2.0.3", {
+      .register("service-worker.js?v=2.0.4", {
         updateViaCache: "none"
       })
       .then(registration => {
